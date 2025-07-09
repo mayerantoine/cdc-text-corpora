@@ -1,0 +1,1 @@
+"""CLI module for cdc-text-corpora package."""

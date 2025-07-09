@@ -1,0 +1,1 @@
+"""Core module for CDC text corpora package."""
