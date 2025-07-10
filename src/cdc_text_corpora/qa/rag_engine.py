@@ -191,7 +191,8 @@ Answer:"""
         self,
         collection: Optional[str] = None,
         language: str = 'en',
-        batch_size: int = 100
+        batch_size: int = 100,
+        show_progress: bool = True
     ) -> Dict[str, Any]:
         """
         Index articles from parsed JSON files into the vector database.
@@ -200,12 +201,11 @@ Answer:"""
             collection: Collection to index ('pcd', 'eid', 'mmwr'). If None, indexes all
             language: Language filter for articles
             batch_size: Number of documents to process in each batch
+            show_progress: Whether to show progress bar
             
         Returns:
             Dictionary with indexing statistics
         """
-        from tqdm.auto import tqdm
-        
         # Get articles from the corpus manager
         articles = self.corpus_manager.load_json_articles_as_iterable(
             collection=collection,
@@ -232,12 +232,24 @@ Answer:"""
         processed_count = 0
         total_chunks = 0
         
-        # Single progress bar for all articles
-        with tqdm(total=total_articles, desc="Processing articles", unit="article") as pbar:
-            for article in articles_list:
+        if show_progress:
+            # Import tqdm here to avoid conflicts
+            try:
+                from tqdm import tqdm
+                progress_bar = tqdm(total=total_articles, desc="Processing articles", unit=" articles", 
+                                  bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]')
+            except ImportError:
+                print("tqdm not available, proceeding without progress bar...")
+                progress_bar = None
+        else:
+            progress_bar = None
+        
+        try:
+            for i, article in enumerate(articles_list):
                 # Skip articles without meaningful content
                 if not article.title and not article.abstract and not article.full_text:
-                    pbar.update(1)
+                    if progress_bar:
+                        progress_bar.update(1)
                     continue
                 
                 # Create document content by combining title, abstract, and full text
@@ -272,9 +284,9 @@ Answer:"""
                 text_chunks = self.text_splitter.split_text(content)
                 
                 # Create documents for each chunk
-                for i, chunk in enumerate(text_chunks):
+                for j, chunk in enumerate(text_chunks):
                     chunk_metadata = metadata.copy()
-                    chunk_metadata["chunk_id"] = i
+                    chunk_metadata["chunk_id"] = j
                     chunk_metadata["total_chunks"] = len(text_chunks)
                     
                     documents.append(Document(
@@ -291,16 +303,20 @@ Answer:"""
                     documents = []
                 
                 # Update progress
-                pbar.update(1)
-                pbar.set_postfix({
-                    'chunks': total_chunks,
-                    'processed': processed_count
-                })
+                if progress_bar:
+                    progress_bar.update(1)
+                    progress_bar.set_postfix_str(f"chunks: {total_chunks}")
+                elif show_progress and (i + 1) % 10 == 0:
+                    # Fallback progress indicator if tqdm not available
+                    print(f"Processed {i + 1}/{total_articles} articles ({total_chunks} chunks)...")
+        
+        finally:
+            if progress_bar:
+                progress_bar.close()
         
         # Add remaining documents
         if documents:
             self.vectorstore.add_documents(documents)
-            total_chunks += len(documents)
         
         # Persist the vector store
         self.vectorstore.persist()
