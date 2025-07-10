@@ -204,7 +204,7 @@ Answer:"""
         Returns:
             Dictionary with indexing statistics
         """
-        print(f"Starting indexing for collection: {collection or 'all'}, language: {language}")
+        from tqdm.auto import tqdm
         
         # Get articles from the corpus manager
         articles = self.corpus_manager.load_json_articles_as_iterable(
@@ -212,83 +212,108 @@ Answer:"""
             language=language
         )
         
+        # Convert to list to get count for progress bar
+        articles_list = list(articles)
+        total_articles = len(articles_list)
+        
+        if total_articles == 0:
+            print("No articles found to index.")
+            return {
+                "articles_processed": 0,
+                "total_chunks": 0,
+                "collection": collection or "all",
+                "language": language,
+                "embedding_model": self.embedding_model_name
+            }
+        
+        print(f"Indexing {total_articles} articles from {collection or 'all'} collection(s)...")
+        
         documents = []
         processed_count = 0
+        total_chunks = 0
         
-        print("Processing articles and creating documents...")
-        
-        for article in articles:
-            # Skip articles without meaningful content
-            if not article.title and not article.abstract and not article.full_text:
-                continue
-            
-            # Create document content by combining title, abstract, and full text
-            content_parts = []
-            
-            if article.title:
-                content_parts.append(f"Title: {article.title}")
-            
-            if article.abstract:
-                content_parts.append(f"Abstract: {article.abstract}")
-            
-            if article.full_text:
-                content_parts.append(f"Full Text: {article.full_text}")
-            
-            content = "\n\n".join(content_parts)
-            
-            # Create metadata
-            metadata = {
-                "title": article.title,
-                "collection": article.collection.value if article.collection else "unknown",
-                "journal": article.journal,
-                "language": article.language,
-                "url": article.url,
-                "authors": ", ".join(article.authors) if article.authors else "",
-                "publication_date": article.publication_date,
-                "has_abstract": bool(article.abstract),
-                "has_full_text": bool(article.full_text),
-                "reference_count": len(article.references) if article.references else 0
-            }
-            
-            # Split the content into chunks
-            text_chunks = self.text_splitter.split_text(content)
-            
-            # Create documents for each chunk
-            for i, chunk in enumerate(text_chunks):
-                chunk_metadata = metadata.copy()
-                chunk_metadata["chunk_id"] = i
-                chunk_metadata["total_chunks"] = len(text_chunks)
+        # Single progress bar for all articles
+        with tqdm(total=total_articles, desc="Processing articles", unit="article") as pbar:
+            for article in articles_list:
+                # Skip articles without meaningful content
+                if not article.title and not article.abstract and not article.full_text:
+                    pbar.update(1)
+                    continue
                 
-                documents.append(Document(
-                    page_content=chunk,
-                    metadata=chunk_metadata
-                ))
-            
-            processed_count += 1
-            
-            # Process in batches
-            if len(documents) >= batch_size:
-                print(f"Adding batch of {len(documents)} documents to vector store...")
-                self.vectorstore.add_documents(documents)
-                documents = []
+                # Create document content by combining title, abstract, and full text
+                content_parts = []
+                
+                if article.title:
+                    content_parts.append(f"Title: {article.title}")
+                
+                if article.abstract:
+                    content_parts.append(f"Abstract: {article.abstract}")
+                
+                if article.full_text:
+                    content_parts.append(f"Full Text: {article.full_text}")
+                
+                content = "\n\n".join(content_parts)
+                
+                # Create metadata
+                metadata = {
+                    "title": article.title,
+                    "collection": article.collection.value if article.collection else "unknown",
+                    "journal": article.journal,
+                    "language": article.language,
+                    "url": article.url,
+                    "authors": ", ".join(article.authors) if article.authors else "",
+                    "publication_date": article.publication_date,
+                    "has_abstract": bool(article.abstract),
+                    "has_full_text": bool(article.full_text),
+                    "reference_count": len(article.references) if article.references else 0
+                }
+                
+                # Split the content into chunks
+                text_chunks = self.text_splitter.split_text(content)
+                
+                # Create documents for each chunk
+                for i, chunk in enumerate(text_chunks):
+                    chunk_metadata = metadata.copy()
+                    chunk_metadata["chunk_id"] = i
+                    chunk_metadata["total_chunks"] = len(text_chunks)
+                    
+                    documents.append(Document(
+                        page_content=chunk,
+                        metadata=chunk_metadata
+                    ))
+                
+                processed_count += 1
+                total_chunks += len(text_chunks)
+                
+                # Process in batches (silently)
+                if len(documents) >= batch_size:
+                    self.vectorstore.add_documents(documents)
+                    documents = []
+                
+                # Update progress
+                pbar.update(1)
+                pbar.set_postfix({
+                    'chunks': total_chunks,
+                    'processed': processed_count
+                })
         
         # Add remaining documents
         if documents:
-            print(f"Adding final batch of {len(documents)} documents to vector store...")
             self.vectorstore.add_documents(documents)
+            total_chunks += len(documents)
         
         # Persist the vector store
         self.vectorstore.persist()
         
         stats = {
             "articles_processed": processed_count,
-            "total_chunks": len(documents) + (processed_count * batch_size) - len(documents),
+            "total_chunks": total_chunks,
             "collection": collection or "all",
             "language": language,
             "embedding_model": self.embedding_model_name
         }
         
-        print(f"Indexing complete! Processed {processed_count} articles")
+        print(f"✅ Indexing complete! Processed {processed_count} articles into {total_chunks} chunks")
         return stats
     
     def semantic_search(

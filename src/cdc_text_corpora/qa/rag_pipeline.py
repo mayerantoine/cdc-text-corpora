@@ -215,21 +215,12 @@ class RAGPipeline:
         
         # Perform indexing
         try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=self.console
-            ) as progress:
-                task = progress.add_task("Indexing articles...", total=None)
-                
-                index_stats = self.rag_engine.index_articles(
-                    collection=self.collection_filter,
-                    language=self.language
-                )
-                
-                progress.update(task, completed=True, description="Indexing complete!")
+            index_stats = self.rag_engine.index_articles(
+                collection=self.collection_filter,
+                language=self.language
+            )
             
-            self.console.print(f"[green]✅ Successfully indexed {index_stats['articles_processed']} articles[/green]")
+            self.console.print(f"[green]Successfully indexed {index_stats['articles_processed']} articles into {index_stats['total_chunks']} chunks[/green]")
             self.is_indexed = True
             return True
             
