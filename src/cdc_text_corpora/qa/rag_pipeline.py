@@ -7,6 +7,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.live import Live
 from rich.table import Table
 from rich import box
 from cdc_text_corpora.core.datasets import CDCCorpus
@@ -248,32 +249,37 @@ class RAGPipeline:
                 if question.lower().strip() in ['quit', 'exit', 'q', '']:
                     break
                 
-                # Process the question with streaming
-                # Stream the response and collect the full answer
+                # Process the question with streaming in a live-updating panel
                 full_answer = ""
                 sources = None
                 
-                for chunk_data in self.rag_engine.ask_question_stream(
-                    question=question,
-                    collection_filter=self.collection_filter,
-                    include_sources=True
-                ):
-                    chunk = chunk_data.get("chunk", "")
-                    if chunk:
-                        self.console.print(chunk, end="", style="white")
-                        full_answer += chunk
-                    
-                    # Store sources from the first chunk
-                    if sources is None and chunk_data.get("sources"):
-                        sources = chunk_data["sources"]
-                
-                # Display the complete answer in a panel after streaming
-                self.console.print("\n")
-                self.console.print(Panel(
-                    full_answer,
+                # Create initial empty panel
+                answer_panel = Panel(
+                    "",
                     title="🤖 Answer",
                     border_style="blue"
-                ))
+                )
+                
+                # Use Rich Live to update the panel in real-time
+                with Live(answer_panel, console=self.console, refresh_per_second=10) as live:
+                    for chunk_data in self.rag_engine.ask_question_stream(
+                        question=question,
+                        collection_filter=self.collection_filter,
+                        include_sources=True
+                    ):
+                        chunk = chunk_data.get("chunk", "")
+                        if chunk:
+                            full_answer += chunk
+                            # Update the panel with the current answer
+                            live.update(Panel(
+                                full_answer,
+                                title="🤖 Answer",
+                                border_style="blue"
+                            ))
+                        
+                        # Store sources from the first chunk
+                        if sources is None and chunk_data.get("sources"):
+                            sources = chunk_data["sources"]
                 
                 # Display sources if available
                 if sources:
