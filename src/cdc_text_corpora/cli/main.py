@@ -3,10 +3,16 @@
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Prompt, Confirm
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+from rich import box
 import pathlib
 from cdc_text_corpora.core.downloader import download_collection
 from cdc_text_corpora.core.datasets import CDCCorpus
 from cdc_text_corpora.utils.config import get_data_directory
+from cdc_text_corpora.qa.rag_engine import RAGEngine
+from cdc_text_corpora.qa.rag_pipeline import RAGPipeline
 
 
 app = typer.Typer(
@@ -89,13 +95,13 @@ def parse(
         help="Collection to parse: pcd, eid, mmwr, or all",
     ),
     language: str = typer.Option(
-        "en",
+        "all",
         "--language",
         "-l",
         help="Language to parse: en, es, fr, zhs, zht, or all",
     ),
     save_json: bool = typer.Option(
-        False,
+        True,
         "--save-json",
         "-j",
         help="Save parsed articles as JSON files",
@@ -176,7 +182,7 @@ def parse(
                 continue
             
             # Parse the collection
-            result = corpus.load_collection_articles(
+            result = corpus.load_parse_save_html_articles(
                 collection=coll,
                 language=language_lower,
                 save_json=save_json,
@@ -224,9 +230,81 @@ def parse(
 
 
 @app.command()
-def qa():
-    """QA CDC text corpora collections."""
-    print(f"RAG code")
+def qa(
+    collection: str = typer.Option(
+        "all",
+        "--collection", 
+        "-c",
+        help="Collection to query: pcd, eid, mmwr, or all"
+    ),
+    language: str = typer.Option(
+        "en", 
+        "--language",
+        "-l", 
+        help="Language filter: en, es, fr, zhs, zht, or all"
+    ),
+    data_dir: str = typer.Option(
+        None,
+        "--data-dir", 
+        "-d",
+        help="Custom data directory path"
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show verbose output"
+    )
+):
+    """Interactive RAG-based question answering for CDC collections."""
+    
+    # Validate collection input
+    valid_collections = ["pcd", "eid", "mmwr", "all"]
+    if collection.lower() not in valid_collections:
+        console.print(f"[red]Error: Invalid collection '{collection}'[/red]")
+        console.print(f"[yellow]Valid options: {', '.join(valid_collections)}[/yellow]")
+        raise typer.Exit(1)
+    
+    # Validate language input
+    valid_languages = ["en", "es", "fr", "zhs", "zht", "all"]
+    if language.lower() not in valid_languages:
+        console.print(f"[red]Error: Invalid language '{language}'[/red]")
+        console.print(f"[yellow]Valid options: {', '.join(valid_languages)}[/yellow]")
+        raise typer.Exit(1)
+    
+    # Convert "all" to None for pipeline
+    collection_filter = None if collection.lower() == "all" else collection.lower()
+    language_param = None if language.lower() == "all" else language.lower()
+    
+    try:
+        # Display command info
+        if verbose:
+            console.print(Panel(
+                f"[bold blue]Starting RAG Q&A Session[/bold blue]\n"
+                f"Collection: {collection}\n"
+                f"Language: {language}\n"
+                f"Data directory: {data_dir or 'default'}",
+                title="Configuration",
+                border_style="blue"
+            ))
+        
+        # Create and run pipeline
+        pipeline = RAGPipeline(
+            data_dir=data_dir,
+            collection_filter=collection_filter,
+            language=language_param
+        )
+        
+        pipeline.run()
+        
+    except KeyboardInterrupt:
+        console.print("\n[yellow]👋 Q&A session interrupted by user[/yellow]")
+        raise typer.Exit(0)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        if verbose:
+            console.print_exception()
+        raise typer.Exit(1)
 
 @app.command()
 def search():
