@@ -222,15 +222,15 @@ Answer:"""
                 "embedding_model": self.embedding_model_name
             }
         
-        print(f"Indexing {total_articles} articles from {collection or 'all'} collection(s)...")
+        print(f"Creating documents from {total_articles} articles...")
         
+        # Create documents from all articles
+        documents = []
         processed_count = 0
-        total_chunks = 0
         
-        # Process articles with progress bar
         try:
             from tqdm import tqdm
-            articles_iterator = tqdm(articles_list, desc="Indexing articles", unit=" articles")
+            articles_iterator = tqdm(articles_list, desc="Processing articles", unit=" articles")
         except ImportError:
             print("Processing articles...")
             articles_iterator = articles_list
@@ -268,30 +268,47 @@ Answer:"""
                 "reference_count": len(article.references) if article.references else 0
             }
             
-            # Split the content into chunks
-            text_chunks = self.text_splitter.split_text(content)
-            
-            # Create documents for each chunk
-            documents = []
-            for j, chunk in enumerate(text_chunks):
-                chunk_metadata = metadata.copy()
-                chunk_metadata["chunk_id"] = j
-                chunk_metadata["total_chunks"] = len(text_chunks)
-                
-                documents.append(Document(
-                    page_content=chunk,
-                    metadata=chunk_metadata
-                ))
-            
-            # Add documents immediately to vector store
-            if documents:
-                self.vectorstore.add_documents(documents)
-                total_chunks += len(documents)
+            # Create document
+            documents.append(Document(
+                page_content=content,
+                metadata=metadata
+            ))
             
             processed_count += 1
         
-        # Persist the vector store
-        self.vectorstore.persist()
+        if not documents:
+            print("No valid documents found to index.")
+            return {
+                "articles_processed": 0,
+                "total_chunks": 0,
+                "collection": collection or "all",
+                "language": language,
+                "embedding_model": self.embedding_model_name
+            }
+        
+        print(f"Splitting {len(documents)} documents into chunks...")
+        
+        # Split documents into chunks using RecursiveCharacterTextSplitter
+        chunked_documents = self.text_splitter.split_documents(documents)
+        total_chunks = len(chunked_documents)
+        
+        print(f"Creating vector database from {total_chunks} chunks...")
+        
+        # Create new vector store from documents
+        self.vectorstore = Chroma.from_documents(
+            documents=chunked_documents,
+            embedding=self.embeddings,
+            persist_directory=self.persist_directory
+        )
+        
+        # Update retriever
+        self.retriever = self.vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 5}
+        )
+        
+        # Recreate RAG chain with new retriever
+        self._create_rag_chain()
         
         stats = {
             "articles_processed": processed_count,
