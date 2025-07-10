@@ -190,9 +190,7 @@ Answer:"""
     def index_articles(
         self,
         collection: Optional[str] = None,
-        language: str = 'en',
-        batch_size: int = 100,
-        show_progress: bool = True
+        language: str = 'en'
     ) -> Dict[str, Any]:
         """
         Index articles from parsed JSON files into the vector database.
@@ -200,8 +198,6 @@ Answer:"""
         Args:
             collection: Collection to index ('pcd', 'eid', 'mmwr'). If None, indexes all
             language: Language filter for articles
-            batch_size: Number of documents to process in each batch
-            show_progress: Whether to show progress bar
             
         Returns:
             Dictionary with indexing statistics
@@ -228,19 +224,15 @@ Answer:"""
         
         print(f"Indexing {total_articles} articles from {collection or 'all'} collection(s)...")
         
-        documents = []
         processed_count = 0
         total_chunks = 0
         
         # Process articles with progress bar
-        if show_progress:
-            try:
-                from tqdm import tqdm
-                articles_iterator = tqdm(articles_list, desc="Processing articles", unit=" articles")
-            except ImportError:
-                print("tqdm not available, proceeding without progress bar...")
-                articles_iterator = articles_list
-        else:
+        try:
+            from tqdm import tqdm
+            articles_iterator = tqdm(articles_list, desc="Indexing articles", unit=" articles")
+        except ImportError:
+            print("Processing articles...")
             articles_iterator = articles_list
         
         for article in articles_iterator:
@@ -280,6 +272,7 @@ Answer:"""
             text_chunks = self.text_splitter.split_text(content)
             
             # Create documents for each chunk
+            documents = []
             for j, chunk in enumerate(text_chunks):
                 chunk_metadata = metadata.copy()
                 chunk_metadata["chunk_id"] = j
@@ -290,17 +283,12 @@ Answer:"""
                     metadata=chunk_metadata
                 ))
             
-            processed_count += 1
-            total_chunks += len(text_chunks)
-            
-            # Process in batches (silently in background)
-            if len(documents) >= batch_size:
+            # Add documents immediately to vector store
+            if documents:
                 self.vectorstore.add_documents(documents)
-                documents = []
-        
-        # Add remaining documents
-        if documents:
-            self.vectorstore.add_documents(documents)
+                total_chunks += len(documents)
+            
+            processed_count += 1
         
         # Persist the vector store
         self.vectorstore.persist()
