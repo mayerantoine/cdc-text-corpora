@@ -249,9 +249,7 @@ class RAGPipeline:
                     break
                 
                 # Process the question with streaming
-                self.console.print("\n[bold blue]🤖 Answer:[/bold blue]")
-                
-                # Stream the response
+                # Stream the response and collect the full answer
                 full_answer = ""
                 sources = None
                 
@@ -269,8 +267,13 @@ class RAGPipeline:
                     if sources is None and chunk_data.get("sources"):
                         sources = chunk_data["sources"]
                 
-                # Add a newline after streaming is complete
-                self.console.print()
+                # Display the complete answer in a panel after streaming
+                self.console.print("\n")
+                self.console.print(Panel(
+                    full_answer,
+                    title="🤖 Answer",
+                    border_style="blue"
+                ))
                 
                 # Display sources if available
                 if sources:
