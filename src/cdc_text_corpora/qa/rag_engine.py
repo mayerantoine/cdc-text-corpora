@@ -187,6 +187,23 @@ Answer:"""
         
         return "\n---\n".join(formatted_docs)
     
+    def _show_progress_for_operation(self, operation_name: str, emoji: str, operation_func, *args, **kwargs):
+        """Show progress indicator for long-running operations."""
+        try:
+            from tqdm import tqdm
+            import time
+            
+            with tqdm(total=1, desc=operation_name, unit="batch") as pbar:
+                start_time = time.time()
+                result = operation_func(*args, **kwargs)
+                operation_time = time.time() - start_time
+                pbar.update(1)
+                pbar.set_postfix({"time": f"{operation_time:.1f}s"})
+                return result
+        except ImportError:
+            print(f"{emoji} {operation_name} (this may take a moment)...")
+            return operation_func(*args, **kwargs)
+    
     def index_articles(
         self,
         collection: Optional[str] = None,
@@ -286,19 +303,28 @@ Answer:"""
                 "embedding_model": self.embedding_model_name
             }
         
-        print(f"Splitting {len(documents)} documents into chunks...")
-        
         # Split documents into chunks using RecursiveCharacterTextSplitter
-        chunked_documents = self.text_splitter.split_documents(documents)
-        total_chunks = len(chunked_documents)
+        print("📄 Splitting documents into chunks...")
+        chunked_documents = self._show_progress_for_operation(
+            "Splitting documents",
+            "📄",
+            self.text_splitter.split_documents,
+            documents
+        )
         
-        print(f"Creating vector database from {total_chunks} chunks...")
+        total_chunks = len(chunked_documents)
+        print(f"✅ Created {total_chunks} chunks from {len(documents)} documents")
         
         # Create new vector store from documents
-        self.vectorstore = Chroma.from_documents(
-            documents=chunked_documents,
-            embedding=self.embeddings,
-            persist_directory=self.persist_directory
+        print("🔍 Creating vector database with embeddings...")
+        self.vectorstore = self._show_progress_for_operation(
+            "Creating embeddings",
+            "🔍",
+            lambda: Chroma.from_documents(
+                documents=chunked_documents,
+                embedding=self.embeddings,
+                persist_directory=self.persist_directory
+            )
         )
         
         # Update retriever
@@ -421,6 +447,54 @@ Answer:"""
             result["sources"] = sources
         
         return result
+    
+    def ask_question_stream(
+        self,
+        question: str,
+        collection_filter: Optional[str] = None,
+        include_sources: bool = True
+    ):
+        """
+        Ask a question using the RAG system with streaming response.
+        
+        Args:
+            question: The question to ask
+            collection_filter: Optional collection filter ('pcd', 'eid', 'mmwr')
+            include_sources: Whether to include source documents in the response
+            
+        Yields:
+            Dictionary with streaming chunks and optional sources
+        """
+        # Apply collection filter if specified
+        if collection_filter:
+            filter_dict = {"collection": collection_filter.lower()}
+            self.retriever = self.vectorstore.as_retriever(
+                search_type="similarity",
+                search_kwargs={"k": 5, "filter": filter_dict}
+            )
+        
+        # Get source documents first
+        source_docs = self.retriever.get_relevant_documents(question) if include_sources else []
+        sources = []
+        
+        if include_sources:
+            for doc in source_docs:
+                source = {
+                    "title": doc.metadata.get("title", "Unknown"),
+                    "collection": doc.metadata.get("collection", "unknown"),
+                    "url": doc.metadata.get("url", ""),
+                    "excerpt": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+                }
+                sources.append(source)
+        
+        # Stream the answer using the RAG chain
+        for chunk in self.rag_chain.stream(question):
+            yield {
+                "question": question,
+                "chunk": chunk,
+                "collection_filter": collection_filter,
+                "sources": sources if include_sources else None
+            }
     
     def get_vectorstore_stats(self) -> Dict[str, Any]:
         """

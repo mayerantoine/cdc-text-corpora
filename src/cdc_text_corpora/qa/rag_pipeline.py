@@ -248,34 +248,34 @@ class RAGPipeline:
                 if question.lower().strip() in ['quit', 'exit', 'q', '']:
                     break
                 
-                # Process the question
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    console=self.console
-                ) as progress:
-                    task = progress.add_task("Thinking...", total=None)
-                    
-                    # Get answer from RAG system
-                    result = self.rag_engine.ask_question(
-                        question=question,
-                        collection_filter=self.collection_filter,
-                        include_sources=True
-                    )
-                    
-                    progress.update(task, completed=True, description="Complete!")
+                # Process the question with streaming
+                self.console.print("\n[bold blue]🤖 Answer:[/bold blue]")
                 
-                # Display answer
-                self.console.print(Panel(
-                    result['answer'],
-                    title="🤖 Answer",
-                    border_style="blue"
-                ))
+                # Stream the response
+                full_answer = ""
+                sources = None
+                
+                for chunk_data in self.rag_engine.ask_question_stream(
+                    question=question,
+                    collection_filter=self.collection_filter,
+                    include_sources=True
+                ):
+                    chunk = chunk_data.get("chunk", "")
+                    if chunk:
+                        self.console.print(chunk, end="", style="white")
+                        full_answer += chunk
+                    
+                    # Store sources from the first chunk
+                    if sources is None and chunk_data.get("sources"):
+                        sources = chunk_data["sources"]
+                
+                # Add a newline after streaming is complete
+                self.console.print()
                 
                 # Display sources if available
-                if result.get('sources'):
+                if sources:
                     self.console.print("\n[bold yellow]📚 Sources:[/bold yellow]")
-                    for i, source in enumerate(result['sources'][:3], 1):  # Show top 3 sources
+                    for i, source in enumerate(sources[:3], 1):  # Show top 3 sources
                         collection_badge = f"[{source['collection'].upper()}]"
                         self.console.print(f"  {i}. {collection_badge} {source['title']}")
                         if source.get('url'):
