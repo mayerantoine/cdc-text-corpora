@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Tuple
 from parsel import Selector
 import os
 import pathlib
@@ -140,6 +140,7 @@ class HTMLArticleLoader:
                             if not file.endswith('_zht.htm'):
                                 continue
                         # If no language specified or unrecognized language, load all files
+                        # TODO get language for the file being loaded.
                         
                         try:
                             # Use the existing _load_html_file method for consistency
@@ -209,11 +210,19 @@ class HTMLArticleLoader:
 
 class CDCArticleParser:
 
-    def __init__(self, journal: str, journal_type: str, language: str, articles_collection: dict):
+    def __init__(self, journal: str, journal_type: str, language: str, articles_collection: dict, validate_articles: bool = True):
         self.journal = journal
         self.journal_type = journal_type
         self.language = language
-        self.articles_html = articles_collection 
+        self.articles_html = articles_collection
+        self.validate_articles = validate_articles
+        
+        # Initialize validator if validation is enabled
+        if self.validate_articles:
+            from cdc_text_corpora.utils.validation import ArticleValidator
+            self.validator = ArticleValidator()
+        else:
+            self.validator = None 
     
     def parse_title(self, html: str) -> str:
         """Parse the article title from HTML.
@@ -230,9 +239,24 @@ class CDCArticleParser:
             return title.strip()
             
         # Try to find EID-specific title format with class
-        title = selector.xpath('//h3[@class="header article-title"]/text()').get()
-        if title:
-            return title.strip()
+        title_nodes = selector.xpath('//h3[@class="header article-title"]//text()').getall()
+        if title_nodes:
+            # Join all text nodes and clean up, excluding numeric references
+            title_parts = []
+            for text in title_nodes:
+                text = text.strip()
+                if text and not text.isdigit():  # Skip numeric references
+                    title_parts.append(text)
+            if title_parts:
+                return " ".join(title_parts).strip()
+            
+        # For EID articles, try h3 with multiple text nodes (join all text within h3)
+        h3_texts = selector.xpath('//h3[position()=1]//text()').getall()
+        if h3_texts:
+            # Join all text nodes and clean up
+            title = " ".join(text.strip() for text in h3_texts if text.strip())
+            if title:
+                return title.strip()
             
         # If no specific class, try any h3 that seems like a title (common in EID journal)
         title = selector.xpath('//h3[contains(@class, "title") or position()=1]/text()').get()
@@ -378,13 +402,26 @@ class CDCArticleParser:
                 "Content source:",
                 "508 Accommodation and the title"
             ]
+        
+        # Try h2 with Abstract (common in many journals)
         abstract_nodes = selector.xpath("//h2[contains(., 'Abstract')]/following-sibling::p//text()").getall()
+        
+        # If not found, try h3 with Abstract (common in EID journals)
+        if not abstract_nodes:
+            abstract_nodes = selector.xpath("//h3[contains(., 'Abstract')]/following-sibling::p//text()").getall()
+            
+        # If still not found, try div or section with abstract class
+        if not abstract_nodes:
+            abstract_nodes = selector.xpath("//div[contains(@class, 'abstract')]//p//text()").getall()
+            
         if abstract_nodes:
             abstract = " ".join(abstract_nodes)
             for notice in notices:
                 abstract = abstract.replace(notice,'')
             # Remove navigation text
             abstract = re.sub(r'Previous\s+Page|Next\s+Page|Table\s+of\s+Contents', '', abstract, flags=re.IGNORECASE)
+            # Clean up extra spaces
+            abstract = re.sub(r'\s+', ' ', abstract).strip()
         return abstract
 
     def filter_articles(self) -> Dict[str, str]:
@@ -581,34 +618,99 @@ class CDCArticleParser:
         
         return article
   
-    def parse_all_articles(self) -> Dict[str, Article]:
-        """Parse all articles in the loaded HTML content."""
+    def parse_all_articles(self) -> Tuple[Dict[str, Article], Dict[str, any]]:
+        """Parse all articles in the loaded HTML content with validation.
+        
+        Returns:
+            Tuple of (articles_dict, parsing_stats)
+        """
         articles = {}
         filtered_html = self.filter_articles()
         
         if not filtered_html:
             print(f"No articles found to parse for {self.journal}")
-            return articles
+            return articles, {"total_files": 0, "successful_parses": 0, "failed_parses": 0, "validation_stats": {}}
         
         print(f"Found {len(filtered_html)} articles to parse for {self.journal}")
         
+        # Parsing counters
         successful_parses = 0
         failed_parses = 0
+        
+        # Validation counters
+        valid_articles = 0
+        invalid_articles = 0
+        validation_issues = {"errors": 0, "warnings": 0, "info": 0}
+        field_issues = {}
         
         for relative_url, html in tqdm(filtered_html.items(), desc=f"Parsing {self.journal} articles"):
             try:
                 article = self.parse_article(relative_url, html)
                 articles[relative_url] = article
                 successful_parses += 1
+                
+                # Validate article if validation is enabled
+                if self.validate_articles and self.validator:
+                    from cdc_text_corpora.utils.validation import ValidationSeverity
+                    validation_result = self.validator.validate_article(article)
+                    
+                    if validation_result.is_valid:
+                        valid_articles += 1
+                    else:
+                        invalid_articles += 1
+                    
+                    # Count issues by severity
+                    for issue in validation_result.issues:
+                        if issue.severity == ValidationSeverity.ERROR:
+                            validation_issues["errors"] += 1
+                        elif issue.severity == ValidationSeverity.WARNING:
+                            validation_issues["warnings"] += 1
+                        elif issue.severity == ValidationSeverity.INFO:
+                            validation_issues["info"] += 1
+                        
+                        # Count field-specific issues
+                        if issue.field not in field_issues:
+                            field_issues[issue.field] = 0
+                        field_issues[issue.field] += 1
+                
             except Exception as e:
                 print(f"Error parsing {relative_url}: {e}")
                 failed_parses += 1
                 continue
         
+        # Create comprehensive stats
+        parsing_stats = {
+            "total_files": len(filtered_html),
+            "successful_parses": successful_parses,
+            "failed_parses": failed_parses,
+            "parsing_success_rate": (successful_parses / len(filtered_html)) * 100 if len(filtered_html) > 0 else 0,
+        }
+        
+        if self.validate_articles:
+            validation_stats = {
+                "validation_enabled": True,
+                "valid_articles": valid_articles,
+                "invalid_articles": invalid_articles,
+                "validation_rate": (valid_articles / successful_parses) * 100 if successful_parses > 0 else 0,
+                "total_validation_issues": sum(validation_issues.values()),
+                "issues_by_severity": validation_issues,
+                "issues_by_field": field_issues
+            }
+        else:
+            validation_stats = {"validation_enabled": False}
+        
+        parsing_stats["validation_stats"] = validation_stats
+        
+        # Print summary
         print(f"Parsing complete: {successful_parses} successful, {failed_parses} failed")
-        return articles
+        if self.validate_articles:
+            print(f"Validation: {valid_articles} valid, {invalid_articles} invalid articles")
+            if sum(validation_issues.values()) > 0:
+                print(f"Issues found: {validation_issues['errors']} errors, {validation_issues['warnings']} warnings, {validation_issues['info']} info")
+        
+        return articles, parsing_stats
     
-    def save_as_json(self, articles: Dict[str, Article], output_dir: Optional[str] = None) -> str:
+    def save_as_json(self, articles: Dict[str, Article], parsing_stats: Optional[Dict[str, any]] = None, output_dir: Optional[str] = None) -> str:
         """Save parsed articles as JSON files in the json-parsed folder.
         
         Args:
@@ -666,6 +768,7 @@ class CDCArticleParser:
             "language": self.language,
             "total_articles": len(articles_data),
             "generated_at": datetime.now().isoformat(),
+            "parsing_stats": parsing_stats or {},
             "articles": articles_data
         }
         
