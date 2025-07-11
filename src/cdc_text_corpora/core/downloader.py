@@ -11,7 +11,7 @@ _URL_MMWR = "https://data.cdc.gov/api/views/ut5n-bmc3/files/3c69a82b-b82e-4152-b
 _URL_EID = "https://data.cdc.gov/api/views/ut5n-bmc3/files/3c9ce6ee-8e97-4ce4-9312-9ad3c98be408?download=true&filename=eid_1995-2023.zip"
 _URL_PCD = "https://data.cdc.gov/api/views/ut5n-bmc3/files/c0594869-ba74-4c26-bf54-b2dab3dff971?download=true&filename=pcd_2004-2023.zip"
 
-def download_file(url, _file_name):
+def download_file(url: str, _file_name: str) -> str:
     """Download a file with rich progress bar."""
     local_filename = _file_name
     
@@ -37,7 +37,7 @@ def download_file(url, _file_name):
     
     return local_filename
 
-def download_copora(journal, url):
+def download_copora(journal: str, url: str) -> None:
     """Download a journal collection to the user's current directory."""
     # Ensure html-outputs directory exists
     ensure_html_outputs_directory()
@@ -103,7 +103,7 @@ def download_collection(collection: str = "all") -> None:
         raise ValueError(f"Invalid collection '{collection}'. Available options: {available_options}")
 
 
-def download_metadata():
+def download_metadata() -> None:
     """Download metadata to the user's current directory."""
     # Unauthenticated client only works with public data sets. Note 'None'
     # in place of application token, and no username or password:

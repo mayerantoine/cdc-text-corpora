@@ -57,7 +57,8 @@ class RAGEngine:
         # Load configuration from environment variables with fallbacks
         self.embedding_model_name = embedding_model or os.getenv("DEFAULT_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
         self.llm_model_name = llm_model or os.getenv("DEFAULT_LLM_MODEL", "gpt-3.5-turbo")
-        self.llm_provider = (llm_provider or os.getenv("DEFAULT_LLM_PROVIDER", "openai")).lower()
+        provider = llm_provider or os.getenv("DEFAULT_LLM_PROVIDER", "openai")
+        self.llm_provider = provider.lower() if provider else "openai"
         self.chunk_size = chunk_size or int(os.getenv("DEFAULT_CHUNK_SIZE", "1000"))
         self.chunk_overlap = chunk_overlap or int(os.getenv("DEFAULT_CHUNK_OVERLAP", "200"))
         
@@ -94,7 +95,7 @@ class RAGEngine:
         # Initialize embeddings
         self.embeddings = HuggingFaceEmbeddings(
             model_name=self.embedding_model_name,
-            show_progress=True
+            show_progress=False
         )
         
         # Initialize ChromaDB vector store
@@ -465,6 +466,12 @@ Answer:"""
         Yields:
             Dictionary with streaming chunks and optional sources
         """
+        # Suppress progress bars and verbose output during streaming
+        import os
+        import sys
+        from contextlib import redirect_stdout, redirect_stderr
+        from io import StringIO
+        
         # Apply collection filter if specified
         if collection_filter:
             filter_dict = {"collection": collection_filter.lower()}
@@ -473,11 +480,15 @@ Answer:"""
                 search_kwargs={"k": 5, "filter": filter_dict}
             )
         
-        # Get source documents first
-        source_docs = self.retriever.get_relevant_documents(question) if include_sources else []
+        # Get source documents first (suppress any progress output)
+        source_docs = []
         sources = []
         
         if include_sources:
+            # Suppress output during document retrieval
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                source_docs = self.retriever.get_relevant_documents(question)
+            
             for doc in source_docs:
                 source = {
                     "title": doc.metadata.get("title", "Unknown"),
@@ -532,7 +543,7 @@ Answer:"""
                 "persist_directory": self.persist_directory
             }
     
-    def clear_vectorstore(self):
+    def clear_vectorstore(self) -> None:
         """Clear all documents from the vector store."""
         try:
             # Delete and recreate the collection
@@ -549,7 +560,7 @@ Answer:"""
         except Exception as e:
             print(f"Error clearing vector store: {e}")
     
-    def switch_llm(self, llm_model: str, llm_provider: str = None):
+    def switch_llm(self, llm_model: str, llm_provider: Optional[str] = None) -> None:
         """
         Switch to a different LLM model and optionally provider.
         

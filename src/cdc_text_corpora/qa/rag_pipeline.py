@@ -51,7 +51,7 @@ class RAGPipeline:
         # Initialize the pipeline
         self._initialize()
     
-    def _initialize(self):
+    def _initialize(self) -> None:
         """Initialize the corpus and RAG engine."""
         try:
             # Initialize corpus manager
@@ -125,7 +125,7 @@ class RAGPipeline:
         
         return status
     
-    def display_pipeline_status(self):
+    def display_pipeline_status(self) -> Dict[str, Any]:
         """Display the current pipeline status."""
         status = self.check_data_availability()
         
@@ -229,7 +229,7 @@ class RAGPipeline:
             self.console.print(f"[red]❌ Indexing failed: {e}[/red]")
             return False
     
-    def interactive_qa_loop(self):
+    def interactive_qa_loop(self) -> None:
         """Run the interactive question/answer loop."""
         self.console.print(Panel(
             "[bold green]🎯 Interactive Q&A Session[/bold green]\n"
@@ -301,7 +301,7 @@ class RAGPipeline:
         
         self.console.print(f"\n[green]👋 Q&A session ended. Answered {question_count} questions.[/green]")
     
-    def run(self):
+    def run(self) -> None:
         """Run the complete RAG pipeline."""
         try:
             # Display initial status

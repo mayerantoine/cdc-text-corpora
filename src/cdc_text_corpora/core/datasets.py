@@ -4,11 +4,11 @@ This module provides the main collection management functionality,
 including metadata operations, statistics, and collection validation.
 """
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Iterator, Union
 import pathlib
 import pandas as pd
 from cdc_text_corpora.core.downloader import download_collection
-from cdc_text_corpora.core.parser import HTMLArticleLoader, CDCArticleParser, CDCCollections
+from cdc_text_corpora.core.parser import HTMLArticleLoader, CDCArticleParser, CDCCollections, Article
 from cdc_text_corpora.utils.config import get_data_directory, get_metadata_path, get_collection_zip_path
 
 
@@ -20,7 +20,7 @@ class ArticleCollection:
     one at a time without loading the entire collection into memory.
     """
     
-    def __init__(self, corpus_manager, collection: str = None, language: str = 'en'):
+    def __init__(self, corpus_manager: 'CDCCorpus', collection: Optional[str] = None, language: str = 'en') -> None:
         """
         Initialize the ArticleCollection.
         
@@ -42,7 +42,7 @@ class ArticleCollection:
             print("No json-parsed directory found. Parse some collections first.")
             return []
         
-        json_files = []
+        json_files: List[pathlib.Path] = []
         
         # If specific collection requested
         if self.collection:
@@ -67,11 +67,11 @@ class ArticleCollection:
         
         return json_files
     
-    def __iter__(self):
+    def __iter__(self) -> Iterator['Article']:
         """Return iterator for the collection."""
         return self._article_generator()
     
-    def _article_generator(self):
+    def _article_generator(self) -> Iterator['Article']:
         """Generator that yields individual Article objects from JSON files."""
         import json
         from cdc_text_corpora.core.parser import Article, CDCCollections
@@ -110,7 +110,7 @@ class ArticleCollection:
                 print(f"Error reading JSON file {json_file}: {e}")
                 continue
     
-    def __len__(self):
+    def __len__(self) -> int:
         """
         Get the total number of articles in the collection.
         Note: This will read JSON files to count articles.
@@ -130,7 +130,7 @@ class ArticleCollection:
         
         return total_count
     
-    def __repr__(self):
+    def __repr__(self) -> str:
         """String representation of the collection."""
         collection_str = self.collection or "all collections"
         language_str = self.language or "all languages"
@@ -182,7 +182,7 @@ class CDCCorpus:
         Returns:
             Dictionary containing collection statistics
         """
-        stats = {}
+        stats: Dict[str, Any] = {}
         
         # Load metadata if available
         metadata_path = get_metadata_path(self._custom_path)
@@ -262,7 +262,7 @@ class CDCCorpus:
             print("Metadata not found. Please run download_collection('metadata') first.")
             return None
     
-    def load_parse_save_html_articles(self, collection: str, language: str = 'en', save_json: bool = False, output_dir: Optional[str] = None) -> Dict[str, Any]:
+    def load_parse_save_html_articles(self, collection: str, language: str = 'en', save_json: bool = False, output_dir: Optional[str] = None, validate_articles: bool = True) -> Dict[str, Any]:
         """
         Load and parse html articles from a collection.
         
@@ -293,27 +293,32 @@ class CDCCorpus:
                 }
             }
         
-        # Step 2: Parse articles
-        parser = CDCArticleParser(collection.lower(), '', language, loader.articles_html)
-        parsed_articles = parser.parse_all_articles()
+        # Step 2: Parse articles with validation using collection-specific parser
+        from cdc_text_corpora.core.parser import create_parser
+        parser = create_parser(collection.lower(), '', language, loader.articles_html, validate_articles=validate_articles)
+        parsed_articles, parsing_stats = parser.parse_all_articles()
         
         # Step 3: Save as JSON if requested
         json_file_path = None
         if save_json and parsed_articles:
             try:
-                json_file_path = parser.save_as_json(parsed_articles, output_dir)
+                json_file_path = parser.save_as_json(parsed_articles, parsing_stats, output_dir)
             except Exception as e:
                 print(f"Warning: Failed to save JSON file: {e}")
+        
+        # Merge parsing stats with basic stats
+        combined_stats = {
+            'html_count': len(loader.articles_html),
+            'parsed_count': len(parsed_articles),
+            'collection': collection.lower(),
+            'language': language
+        }
+        combined_stats.update(parsing_stats)
         
         result = {
             'html_articles': loader.articles_html,
             'parsed_articles': parsed_articles,
-            'stats': {
-                'html_count': len(loader.articles_html),
-                'parsed_count': len(parsed_articles),
-                'collection': collection.lower(),
-                'language': language
-            }
+            'stats': combined_stats
         }
         
         # Add JSON file path to result if saved
@@ -322,7 +327,7 @@ class CDCCorpus:
         
         return result
     
-    def load_json_articles_as_dataframe(self, json_file_path: str = None, collection: str = None, language: str = None) -> Optional[pd.DataFrame]:
+    def load_json_articles_as_dataframe(self, json_file_path: Optional[str] = None, collection: Optional[str] = None, language: Optional[str] = None) -> Optional[pd.DataFrame]:
         """
         Load parsed JSON articles as a pandas DataFrame.
         
@@ -396,7 +401,7 @@ class CDCCorpus:
             print(f"Error loading JSON file {target_file}: {e}")
             return None
     
-    def load_json_articles_as_iterable(self, collection: str = None, language: str = 'en'):
+    def load_json_articles_as_iterable(self, collection: Optional[str] = None, language: str = 'en') -> ArticleCollection:
         """
         Load articles as an iterable ArticleCollection for memory-efficient processing.
         

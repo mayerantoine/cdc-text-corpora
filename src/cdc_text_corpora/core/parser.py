@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Union, Tuple, Any
 from parsel import Selector
 import os
 import pathlib
@@ -42,9 +42,9 @@ class HTMLArticleLoader:
         self.journal = journal
         self.journal_type = journal_type
         self.language = language
-        self.articles_html = None
+        self.articles_html: Optional[Dict[str, str]] = None
 
-    def load_from_file(self):
+    def load_from_file(self) -> None:
         self.articles_html  = self._load_html_collection()
 
     def _load_html_collection(self) -> Dict[str, str]:
@@ -156,7 +156,7 @@ class HTMLArticleLoader:
         print(f"Loaded {len(articles_html)} HTML files for {self.journal}{language_msg}")
         return articles_html
 
-    def _load_html_file(self, file_path_name: str):
+    def _load_html_file(self, file_path_name: str) -> str:
         """Load HTML content for the specified paper.
         
         Tries multiple encodings to handle different file formats:
@@ -189,7 +189,7 @@ class HTMLArticleLoader:
             f'Unable to decode {file_path_name} with any of the tried encodings: {encodings_to_try}'
         )
 
-    def _extract_zip_files(self):
+    def _extract_zip_files(self) -> None:
         """Extract all collection zip files to the json-html directory."""
         data_dir = get_data_directory()
         zip_dir = data_dir / "html-outputs"
@@ -222,7 +222,7 @@ class CDCArticleParser(ABC):
         # Initialize validator if validation is enabled
         if self.validate_articles:
             from cdc_text_corpora.utils.validation import ArticleValidator
-            self.validator = ArticleValidator()
+            self.validator: Optional['ArticleValidator'] = ArticleValidator()
         else:
             self.validator = None 
     
@@ -328,7 +328,7 @@ class CDCArticleParser(ABC):
 
     def filter_articles(self) -> Dict[str, str]:
         """Filter out cover articles and other non-content pages."""
-        filtered = {}
+        filtered: Dict[str, str] = {}
         if not self.articles_html:
             return filtered
         
@@ -353,7 +353,7 @@ class CDCArticleParser(ABC):
         - Filters out navigation, headers, and other non-content
         """
         selector = Selector(text=html)
-        paragraphs = []
+        paragraphs: List[str] = []
         
         # For EID journals, first try extracting from mainbody div which contains the main article content
         if self.journal.startswith('eid') and selector.xpath('//div[@id="mainbody"]').get():
@@ -520,13 +520,13 @@ class CDCArticleParser(ABC):
         
         return article
   
-    def parse_all_articles(self) -> Tuple[Dict[str, Article], Dict[str, any]]:
+    def parse_all_articles(self) -> Tuple[Dict[str, Article], Dict[str, Any]]:
         """Parse all articles in the loaded HTML content with validation.
         
         Returns:
             Tuple of (articles_dict, parsing_stats)
         """
-        articles = {}
+        articles: Dict[str, Article] = {}
         filtered_html = self.filter_articles()
         
         if not filtered_html:
@@ -581,7 +581,7 @@ class CDCArticleParser(ABC):
                 continue
         
         # Create comprehensive stats
-        parsing_stats = {
+        parsing_stats: Dict[str, Any] = {
             "total_files": len(filtered_html),
             "successful_parses": successful_parses,
             "failed_parses": failed_parses,
@@ -612,7 +612,7 @@ class CDCArticleParser(ABC):
         
         return articles, parsing_stats
     
-    def save_as_json(self, articles: Dict[str, Article], parsing_stats: Optional[Dict[str, any]] = None, output_dir: Optional[str] = None) -> str:
+    def save_as_json(self, articles: Dict[str, Article], parsing_stats: Optional[Dict[str, Any]] = None, output_dir: Optional[str] = None) -> str:
         """Save parsed articles as JSON files in the json-parsed folder.
         
         Args:
@@ -715,9 +715,9 @@ class EIDArticleParser(CDCArticleParser):
                 return title.strip()
         
         # Fallback - try first heading of any type
-        title = selector.xpath('(//*[self::h1 or self::h2 or self::h3])[1]/text()').get()
-        if title:
-            return title.strip()
+        title_result = selector.xpath('(//*[self::h1 or self::h2 or self::h3])[1]/text()').get()
+        if title_result:
+            return title_result.strip()
         
         return ""
     
@@ -1024,7 +1024,7 @@ if __name__ == '__main__':
     #print(data)
     
     parser = create_parser('mmwr','','en',{'1':html_data})
-    data = parser.parse_article(url='',html=html_data)
+    data = parser.parse_article(relative_url='', html=html_data)
     print(data)
     #title = parser.parse_title(data)
     #abstract = parser.parse_abstract(data)

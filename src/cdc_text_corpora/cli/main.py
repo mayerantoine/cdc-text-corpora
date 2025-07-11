@@ -37,7 +37,7 @@ def download(
         "-v",
         help="Show verbose output",
     ),
-):
+) -> None:
     """Download CDC text corpora collections."""
     
     # Validate collection input
@@ -116,9 +116,14 @@ def parse(
         False,
         "--verbose",
         "-v",
-        help="Show verbose output",
+        help="Show verbose output including validation details",
     ),
-):
+    validate: bool = typer.Option(
+        True,
+        "--validate/--no-validate",
+        help="Enable/disable article validation during parsing",
+    ),
+) -> None:
     """Parse CDC text corpora collections into structured data."""
     
     # Validate collection input
@@ -181,12 +186,13 @@ def parse(
                 console.print(f"[dim]Download with: cdc-corpus download -c {coll}[/dim]")
                 continue
             
-            # Parse the collection
+            # Parse the collection with validation
             result = corpus.load_parse_save_html_articles(
                 collection=coll,
                 language=language_lower,
                 save_json=save_json,
-                output_dir=output_dir
+                output_dir=output_dir,
+                validate_articles=validate
             )
             
             # Check for errors
@@ -255,7 +261,7 @@ def qa(
         "-v",
         help="Show verbose output"
     )
-):
+) -> None:
     """Interactive RAG-based question answering for CDC collections."""
     
     # Validate collection input
@@ -307,11 +313,11 @@ def qa(
         raise typer.Exit(1)
 
 @app.command()
-def search():
+def search() -> None:
     """Search CDC text corpora collections."""
     print(f"RAG code")
 
-def main():
+def main() -> None:
     """Main CLI entry point."""
     app()
 
