@@ -8,6 +8,7 @@ import re
 from zipfile import ZipFile
 from tqdm.auto import tqdm
 from enum import Enum
+from abc import ABC, abstractmethod
 from cdc_text_corpora.utils.config import get_data_directory, get_collection_zip_path
 
 
@@ -208,7 +209,8 @@ class HTMLArticleLoader:
 
 
 
-class CDCArticleParser:
+class CDCArticleParser(ABC):
+    """Base class for CDC article parsers with common functionality."""
 
     def __init__(self, journal: str, journal_type: str, language: str, articles_collection: dict, validate_articles: bool = True):
         self.journal = journal
@@ -224,205 +226,105 @@ class CDCArticleParser:
         else:
             self.validator = None 
     
+    @abstractmethod
     def parse_title(self, html: str) -> str:
-        """Parse the article title from HTML.
-        
-        Handles different journal formats:
-        - PCD and MMWR use h1 tags
-        - EID may use h3 tags with class 'header article-title'
-        """
-        selector = Selector(text=html)
-        
-        # First try to find title in h1 tags (common in PCD, MMWR)
-        title = selector.xpath('//h1/text()').get()
-        if title:
-            return title.strip()
-            
-        # Try to find EID-specific title format with class
-        title_nodes = selector.xpath('//h3[@class="header article-title"]//text()').getall()
-        if title_nodes:
-            # Join all text nodes and clean up, excluding numeric references
-            title_parts = []
-            for text in title_nodes:
-                text = text.strip()
-                if text and not text.isdigit():  # Skip numeric references
-                    title_parts.append(text)
-            if title_parts:
-                return " ".join(title_parts).strip()
-            
-        # For EID articles, try h3 with multiple text nodes (join all text within h3)
-        h3_texts = selector.xpath('//h3[position()=1]//text()').getall()
-        if h3_texts:
-            # Join all text nodes and clean up
-            title = " ".join(text.strip() for text in h3_texts if text.strip())
-            if title:
-                return title.strip()
-            
-        # If no specific class, try any h3 that seems like a title (common in EID journal)
-        title = selector.xpath('//h3[contains(@class, "title") or position()=1]/text()').get()
-        if title:
-            return title.strip()
-            
-        # Fallback - try first heading of any type
-        title = selector.xpath('(//*[self::h1 or self::h2 or self::h3])[1]/text()').get()
-        if title:
-            return title.strip()
-            
-        return ""
+        """Parse the article title from HTML. Must be implemented by subclasses."""
+        pass
 
+    @abstractmethod
     def parse_authors(self, html: str) -> List[str]:
-        """
-        Parse author information from HTML.
-        
-        Handles different journal formats:
-        - PCD and MMWR typically have authors in h4 tags or meta tags
-        - MMWR older articles often have "Reported by:" format
-        - EID might have authors in div with id="authors"
-        """
-        selector = Selector(text=html)
-        authors = []
+        """Parse author information from HTML. Must be implemented by subclasses."""
+        pass
 
-        # First, try to get authors from meta tags (common in PCD)
+    @abstractmethod
+    def parse_abstract(self, html: str) -> str:
+        """Parse the article abstract from HTML. Must be implemented by subclasses."""
+        pass
+    
+    # Common utility methods
+    def is_likely_institution(self, text: str) -> bool:
+        """Check if text is likely an institution or department name."""
+        institution_words = {
+            'university', 'institute', 'center', 'division', 'department',
+            'school', 'college', 'hospital', 'clinic', 'laboratory',
+            'program', 'service', 'branch', 'office', 'bureau', 'center',
+            'dept', 'div', 'services', 'unit', 'univ'
+        }
+        
+        text_words = set(word.lower() for word in text.split())
+        return bool(text_words & institution_words)
+
+    def clean_author_name(self, text: str) -> str:
+        """Clean author name by removing titles, degrees and affiliations."""
+        # Skip if text looks like an institution
+        if self.is_likely_institution(text):
+            return ""
+        
+        # Remove common titles and degrees
+        titles = ['Dr', 'PhD', 'MD', 'MPH', 'MS', 'MA', 'DrPH', 'MSc', 'MBBS', 'DVM', 'BSc', 'MPP', 'ScD']
+        text = text.strip()
+        
+        # Remove anything in parentheses first
+        text = re.sub(r'\([^)]*\)', '', text)
+        
+        # Remove titles with word boundaries
+        for title in titles:
+            text = re.sub(rf'\b{title}\b\.?', '', text)
+        
+        # Split on institutional indicators and take first part
+        splits = re.split(r'\b(?:from|at|of)\b', text, flags=re.IGNORECASE)
+        text = splits[0]
+        
+        # Remove anything after a comma or semicolon
+        text = text.split(',')[0].split(';')[0]
+        
+        # Clean up extra spaces and punctuation
+        text = re.sub(r'\s+', ' ', text)
+        text = text.strip(' .,;')
+        
+        # Final check - if it looks like an institution after cleaning, return empty
+        if self.is_likely_institution(text):
+            return ""
+            
+        return text
+
+    def clean_text_with_notices(self, text: str) -> str:
+        """Clean text by removing common notice/navigation text."""
+        notices = [
+            "Persons using assistive technology might not be able to fully access information in this file",
+            "For assistance, please send e-mail to",
+            "Type 508 Accommodation",
+            "mmwrq@cdc.gov",
+            "Information about electronic access to this publication",
+            "Back to top",
+            "Page last reviewed:",
+            "Page last updated:",
+            "Content source:",
+            "508 Accommodation and the title",
+            "Top of Page"
+        ]
+        
+        for notice in notices:
+            text = text.replace(notice, '')
+        
+        # Remove navigation text
+        text = re.sub(r'Previous\s+Page|Next\s+Page|Table\s+of\s+Contents|Top\s+of\s+Page', '', text, flags=re.IGNORECASE)
+        # Clean up extra spaces
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text
+
+    def get_authors_from_meta(self, selector: Selector) -> List[str]:
+        """Get authors from meta tags (common in PCD)."""
+        authors = []
         meta_authors = selector.xpath('//meta[@name="citation_author"]/@content').getall()
         if meta_authors:
             for author in meta_authors:
                 clean_name = author.strip()
                 if clean_name:
                     authors.append(clean_name)
-            return authors
-
-        def is_likely_institution(text: str) -> bool:
-            """Check if text is likely an institution or department name."""
-            institution_words = {
-                'university', 'institute', 'center', 'division', 'department',
-                'school', 'college', 'hospital', 'clinic', 'laboratory',
-                'program', 'service', 'branch', 'office', 'bureau', 'center',
-                'dept', 'div', 'services', 'unit', 'univ'
-            }
-            
-            text_words = set(word.lower() for word in text.split())
-            return bool(text_words & institution_words)
-
-        def clean_author_name(text: str) -> str:
-            """Clean author name by removing titles, degrees and affiliations."""
-            # Skip if text looks like an institution
-            if is_likely_institution(text):
-                return ""
-            
-            # Remove common titles and degrees
-            titles = ['Dr', 'PhD', 'MD', 'MPH', 'MS', 'MA', 'DrPH', 'MSc', 'MBBS', 'DVM', 'BSc', 'MPP', 'ScD']
-            text = text.strip()
-            
-            # Remove anything in parentheses first
-            text = re.sub(r'\([^)]*\)', '', text)
-            
-            # Remove titles with word boundaries
-            for title in titles:
-                text = re.sub(rf'\b{title}\b\.?', '', text)
-            
-            # Split on institutional indicators and take first part
-            splits = re.split(r'\b(?:from|at|of)\b', text, flags=re.IGNORECASE)
-            text = splits[0]
-            
-            # Remove anything after a comma or semicolon
-            text = text.split(',')[0].split(';')[0]
-            
-            # Clean up extra spaces and punctuation
-            text = re.sub(r'\s+', ' ', text)
-            text = text.strip(' .,;')
-            
-            # Final check - if it looks like an institution after cleaning, return empty
-            if is_likely_institution(text):
-                return ""
-                
-            return text
-
-        # For MMWR, check for "Reported by:" pattern first
-        if self.journal == 'mmwr':
-            reported_by_nodes = selector.xpath("//p[contains(., 'Reported by:')]")
-            for node in reported_by_nodes:
-                text = "".join(node.xpath(".//text()").getall())
-                if 'Reported by:' in text:
-                    # Extract text after "Reported by:"
-                    author_text = text.split("Reported by:", 1)[1]
-                    
-                    # Split on common delimiters
-                    raw_authors = re.split(r'[,;]|\band\b|\bfrom\b|\bat\b', author_text)
-                    
-                    # Clean each author name
-                    cleaned_authors = []
-                    for author in raw_authors:
-                        clean_name = clean_author_name(author)
-                        if clean_name and len(clean_name.split()) >= 2:  # Ensure at least first and last name
-                            cleaned_authors.append(clean_name)
-                    
-                    if cleaned_authors:
-                        authors.extend(cleaned_authors)
-                        break
-
-        # If no authors found via "Reported by:", try standard formats
-        if not authors:
-            # Try h4 with author class
-            author_tags = selector.xpath("//h4[contains(@class, 'author')]//text()").getall()
-            if author_tags:
-                raw_authors = []
-                current_author = []
-                for tag in author_tags:
-                    if tag.strip():
-                        if ',' in tag or 'and' in tag.lower():
-                            # Split on delimiters and add to raw_authors
-                            parts = re.split(r'[,;]|\band\b', tag)
-                            raw_authors.extend(parts)
-                        else:
-                            current_author.append(tag)
-                
-                if current_author:
-                    raw_authors.append(' '.join(current_author))
-                
-                # Clean each author name
-                for author in raw_authors:
-                    clean_name = clean_author_name(author)
-                    if clean_name and len(clean_name.split()) >= 2:
-                        authors.append(clean_name)
-
         return authors
 
-    def parse_abstract(self, html: str) -> str:
-        selector = Selector(text=html)
-        abstract = ""
-        notices = [
-                "Persons using assistive technology might not be able to fully access information in this file",
-                "For assistance, please send e-mail to",
-                "Type 508 Accommodation",
-                "mmwrq@cdc.gov",
-                "Information about electronic access to this publication",
-                "Back to top",
-                "Page last reviewed:",
-                "Page last updated:",
-                "Content source:",
-                "508 Accommodation and the title"
-            ]
-        
-        # Try h2 with Abstract (common in many journals)
-        abstract_nodes = selector.xpath("//h2[contains(., 'Abstract')]/following-sibling::p//text()").getall()
-        
-        # If not found, try h3 with Abstract (common in EID journals)
-        if not abstract_nodes:
-            abstract_nodes = selector.xpath("//h3[contains(., 'Abstract')]/following-sibling::p//text()").getall()
-            
-        # If still not found, try div or section with abstract class
-        if not abstract_nodes:
-            abstract_nodes = selector.xpath("//div[contains(@class, 'abstract')]//p//text()").getall()
-            
-        if abstract_nodes:
-            abstract = " ".join(abstract_nodes)
-            for notice in notices:
-                abstract = abstract.replace(notice,'')
-            # Remove navigation text
-            abstract = re.sub(r'Previous\s+Page|Next\s+Page|Table\s+of\s+Contents', '', abstract, flags=re.IGNORECASE)
-            # Clean up extra spaces
-            abstract = re.sub(r'\s+', ' ', abstract).strip()
-        return abstract
 
     def filter_articles(self) -> Dict[str, str]:
         """Filter out cover articles and other non-content pages."""
@@ -785,6 +687,334 @@ class CDCArticleParser:
             raise
 
 
+class EIDArticleParser(CDCArticleParser):
+    """Parser for EID (Emerging Infectious Diseases) articles."""
+    
+    def parse_title(self, html: str) -> str:
+        """Parse the article title from EID HTML."""
+        selector = Selector(text=html)
+        
+        # Try to find EID-specific title format with class
+        title_nodes = selector.xpath('//h3[@class="header article-title"]//text()').getall()
+        if title_nodes:
+            # Join all text nodes and clean up, excluding numeric references
+            title_parts = []
+            for text in title_nodes:
+                text = text.strip()
+                if text and not text.isdigit():  # Skip numeric references
+                    title_parts.append(text)
+            if title_parts:
+                return " ".join(title_parts).strip()
+        
+        # For EID articles, try h3 with multiple text nodes (join all text within h3)
+        h3_texts = selector.xpath('//h3[position()=1]//text()').getall()
+        if h3_texts:
+            # Join all text nodes and clean up
+            title = " ".join(text.strip() for text in h3_texts if text.strip())
+            if title:
+                return title.strip()
+        
+        # Fallback - try first heading of any type
+        title = selector.xpath('(//*[self::h1 or self::h2 or self::h3])[1]/text()').get()
+        if title:
+            return title.strip()
+        
+        return ""
+    
+    def parse_authors(self, html: str) -> List[str]:
+        """Parse author information from EID HTML."""
+        selector = Selector(text=html)
+        authors = []
+        
+        # Try to get authors from meta tags first
+        authors = self.get_authors_from_meta(selector)
+        if authors:
+            return authors
+        
+        # Try h4 with author class
+        author_tags = selector.xpath("//h4[contains(@class, 'author')]//text()").getall()
+        if author_tags:
+            raw_authors = []
+            current_author = []
+            for tag in author_tags:
+                if tag.strip():
+                    if ',' in tag or 'and' in tag.lower():
+                        # Split on delimiters and add to raw_authors
+                        parts = re.split(r'[,;]|\band\b', tag)
+                        raw_authors.extend(parts)
+                    else:
+                        current_author.append(tag)
+            
+            if current_author:
+                raw_authors.append(' '.join(current_author))
+            
+            # Clean each author name
+            for author in raw_authors:
+                clean_name = self.clean_author_name(author)
+                if clean_name and len(clean_name.split()) >= 2:
+                    authors.append(clean_name)
+        
+        return authors
+    
+    def parse_abstract(self, html: str) -> str:
+        """Parse the article abstract from EID HTML."""
+        selector = Selector(text=html)
+        
+        # Try h3 with Abstract (common in EID journals)
+        abstract_nodes = selector.xpath("//h3[contains(., 'Abstract')]/following-sibling::p//text()").getall()
+        
+        # If not found, try h2 with Abstract 
+        if not abstract_nodes:
+            abstract_nodes = selector.xpath("//h2[contains(., 'Abstract')]/following-sibling::p//text()").getall()
+        
+        # If still not found, try div or section with abstract class
+        if not abstract_nodes:
+            abstract_nodes = selector.xpath("//div[contains(@class, 'abstract')]//p//text()").getall()
+        
+        if abstract_nodes:
+            abstract = " ".join(abstract_nodes)
+            return self.clean_text_with_notices(abstract)
+        
+        return ""
+
+
+class MMWRArticleParser(CDCArticleParser):
+    """Parser for MMWR (Morbidity and Mortality Weekly Report) articles."""
+    
+    def parse_title(self, html: str) -> str:
+        """Parse the article title from MMWR HTML."""
+        selector = Selector(text=html)
+        
+        # Try to find title in h1 tags using normalize-space (both lowercase and uppercase - common in MMWR)
+        title = selector.xpath('normalize-space(//h1)').get()
+        if not title:
+            title = selector.xpath('normalize-space(//H1)').get()
+        if title:
+            return title.strip()
+        
+        # Try HTML title tag as fallback
+        title_tag = selector.xpath('//title//text() | //TITLE//text()').getall()
+        if title_tag:
+            title_text = " ".join(title_tag).strip()
+            # Clean up common formatting issues in title tags
+            title_text = " ".join(title_text.split())
+            if title_text:
+                return title_text
+        
+        # Fallback - try first heading of any type (both cases)
+        title = selector.xpath('(//*[self::h1 or self::h2 or self::h3 or self::H1 or self::H2 or self::H3])[1]/text()').get()
+        if title:
+            return title.strip()
+        
+        return ""
+    
+    def parse_authors(self, html: str) -> List[str]:
+        """Parse author information from MMWR HTML."""
+        selector = Selector(text=html)
+        authors = []
+        
+        # Try to get authors from meta tags first
+        authors = self.get_authors_from_meta(selector)
+        if authors:
+            return authors
+        
+        # For MMWR, check for "Reported by:" pattern
+        reported_by_nodes = selector.xpath("//p[contains(., 'Reported by:')]")
+        for node in reported_by_nodes:
+            text = "".join(node.xpath(".//text()").getall())
+            if 'Reported by:' in text:
+                # Extract text after "Reported by:"
+                author_text = text.split("Reported by:", 1)[1]
+                
+                # Split on common delimiters
+                raw_authors = re.split(r'[,;]|\band\b|\bfrom\b|\bat\b', author_text)
+                
+                # Clean each author name
+                cleaned_authors = []
+                for author in raw_authors:
+                    clean_name = self.clean_author_name(author)
+                    if clean_name and len(clean_name.split()) >= 2:  # Ensure at least first and last name
+                        cleaned_authors.append(clean_name)
+                
+                if cleaned_authors:
+                    authors.extend(cleaned_authors)
+                    break
+        
+        # If no authors found via "Reported by:", try standard formats
+        if not authors:
+            # Try h4 with author class
+            author_tags = selector.xpath("//h4[contains(@class, 'author')]//text()").getall()
+            if author_tags:
+                raw_authors = []
+                current_author = []
+                for tag in author_tags:
+                    if tag.strip():
+                        if ',' in tag or 'and' in tag.lower():
+                            # Split on delimiters and add to raw_authors
+                            parts = re.split(r'[,;]|\band\b', tag)
+                            raw_authors.extend(parts)
+                        else:
+                            current_author.append(tag)
+                
+                if current_author:
+                    raw_authors.append(' '.join(current_author))
+                
+                # Clean each author name
+                for author in raw_authors:
+                    clean_name = self.clean_author_name(author)
+                    if clean_name and len(clean_name.split()) >= 2:
+                        authors.append(clean_name)
+        
+        return authors
+    
+    def parse_abstract(self, html: str) -> str:
+        """Parse the article abstract from MMWR HTML."""
+        selector = Selector(text=html)
+        
+        # Try h2 with Abstract (common in MMWR)
+        abstract_nodes = selector.xpath("//h2[contains(., 'Abstract')]/following-sibling::p//text()").getall()
+        
+        # If not found, try h3 with Abstract
+        if not abstract_nodes:
+            abstract_nodes = selector.xpath("//h3[contains(., 'Abstract')]/following-sibling::p//text()").getall()
+        
+        # If still not found, try div or section with abstract class
+        if not abstract_nodes:
+            abstract_nodes = selector.xpath("//div[contains(@class, 'abstract')]//p//text()").getall()
+        
+        # Fallback: Look for paragraphs with "Summary-Abstract-Text" class (common in MMWR preview articles)
+        if not abstract_nodes:
+            abstract_nodes = selector.xpath("//p[contains(@class, 'Summary-Abstract-Text')]//text()").getall()
+        
+        # Additional fallback: Look for abstract content after "Abstract" title paragraph
+        if not abstract_nodes:
+            abstract_title = selector.xpath("//p[contains(@class, 'Summary-Abstract-Title')]")
+            if abstract_title:
+                # Get all following paragraphs with Summary-Abstract-Text class
+                following_abstract = selector.xpath("//p[contains(@class, 'Summary-Abstract-Title')]/following-sibling::p[contains(@class, 'Summary-Abstract-Text')]//text()").getall()
+                if following_abstract:
+                    abstract_nodes = following_abstract
+        
+        if abstract_nodes:
+            abstract = " ".join(abstract_nodes)
+            return self.clean_text_with_notices(abstract)
+        
+        return ""
+
+
+class PCDArticleParser(CDCArticleParser):
+    """Parser for PCD (Preventing Chronic Disease) articles."""
+    
+    def parse_title(self, html: str) -> str:
+        """Parse the article title from PCD HTML."""
+        selector = Selector(text=html)
+        
+        # Try to find title in h1 tags (common in PCD)
+        title = selector.xpath('//h1/text()').get()
+        if title:
+            return title.strip()
+        
+        # Fallback - try first heading of any type
+        title = selector.xpath('(//*[self::h1 or self::h2 or self::h3])[1]/text()').get()
+        if title:
+            return title.strip()
+        
+        return ""
+    
+    def parse_authors(self, html: str) -> List[str]:
+        """Parse author information from PCD HTML."""
+        selector = Selector(text=html)
+        authors = []
+        
+        # Try to get authors from meta tags first (common in PCD)
+        authors = self.get_authors_from_meta(selector)
+        if authors:
+            return authors
+        
+        # Try h4 with author class
+        author_tags = selector.xpath("//h4[contains(@class, 'author')]//text()").getall()
+        if author_tags:
+            raw_authors = []
+            current_author = []
+            for tag in author_tags:
+                if tag.strip():
+                    if ',' in tag or 'and' in tag.lower():
+                        # Split on delimiters and add to raw_authors
+                        parts = re.split(r'[,;]|\band\b', tag)
+                        raw_authors.extend(parts)
+                    else:
+                        current_author.append(tag)
+            
+            if current_author:
+                raw_authors.append(' '.join(current_author))
+            
+            # Clean each author name
+            for author in raw_authors:
+                clean_name = self.clean_author_name(author)
+                if clean_name and len(clean_name.split()) >= 2:
+                    authors.append(clean_name)
+        
+        return authors
+    
+    def parse_abstract(self, html: str) -> str:
+        """Parse the article abstract from PCD HTML."""
+        selector = Selector(text=html)
+        
+        # Try h2 with Abstract (common in PCD) - check both exact text and contains
+        abstract_h2 = selector.xpath("//h2[text()='Abstract']/text()").get()
+        if not abstract_h2:
+            abstract_h2 = selector.xpath("//h2[normalize-space(.)='Abstract']").get()
+        if abstract_h2:
+            # Get all paragraphs following Abstract h2 (excluding small text paragraphs)
+            all_ps = selector.xpath("//h2[text()='Abstract' or normalize-space(.)='Abstract']/following-sibling::p[not(contains(@class,'psmall'))]")
+            results = []
+            for p in all_ps:
+                # Get the section this paragraph belongs to (the preceding h2)
+                section_node = p.xpath(".//preceding-sibling::h2[1]").get()
+                if section_node:
+                    # Use normalize-space to get full text including nested elements
+                    section_selector = Selector(text=section_node)
+                    section = section_selector.xpath("normalize-space(.)").get()
+                    if section:
+                        section = section.strip().lower()
+                        data = " ".join(p.xpath(".//text()").getall()).replace("\n", "")
+                        results.append({"section": section, "data": data})
+            
+            # Extract only paragraphs that belong to the abstract section
+            extract_section = lambda x, rs: " ".join([ele['data'] for ele in rs if ele['section'] == x])
+            abstract_text = extract_section('abstract', results)
+            
+            if abstract_text:
+                return self.clean_text_with_notices(abstract_text)
+        
+        
+        # If not found, try h3 with Abstract
+        abstract_nodes = selector.xpath("//h3[contains(., 'Abstract')]/following-sibling::p//text()").getall()
+        if not abstract_nodes:
+            abstract_nodes = selector.xpath("//div[contains(@class, 'abstract')]//p//text()").getall()
+        
+        if abstract_nodes:
+            abstract = " ".join(abstract_nodes)
+            return self.clean_text_with_notices(abstract)
+        
+        return ""
+
+
+# Factory function to create appropriate parser
+def create_parser(collection: str, journal_type: str, language: str, articles_collection: dict, validate_articles: bool = True) -> CDCArticleParser:
+    """Create appropriate parser based on collection type."""
+    collection_lower = collection.lower()
+    
+    if collection_lower == 'eid':
+        return EIDArticleParser(collection, journal_type, language, articles_collection, validate_articles)
+    elif collection_lower == 'mmwr':
+        return MMWRArticleParser(collection, journal_type, language, articles_collection, validate_articles)
+    elif collection_lower == 'pcd':
+        return PCDArticleParser(collection, journal_type, language, articles_collection, validate_articles)
+    else:
+        raise ValueError(f"Unknown collection: {collection}. Supported collections: eid, mmwr, pcd")
+
+
 if __name__ == '__main__':
     #f = '/Users/mayerantoine/Code/cdc-text-corpora/cdc-corpus-data/json-html/pcd/issues/2005/nov/05_0059.htm'
     #f = '/Users/mayerantoine/Code/cdc-text-corpora/cdc-corpus-data/json-html/pcd/issues/2019/18_0093.htm'
@@ -793,7 +1023,7 @@ if __name__ == '__main__':
     html_data = loader._load_html_file(f)
     #print(data)
     
-    parser = CDCArticleParser('mmwr','','en',{'1':html_data})
+    parser = create_parser('mmwr','','en',{'1':html_data})
     data = parser.parse_article(url='',html=html_data)
     print(data)
     #title = parser.parse_title(data)

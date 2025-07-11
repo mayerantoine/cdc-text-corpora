@@ -1,0 +1,38 @@
+{
+  "created_at": "2025-07-10T15:46:12.425877",
+  "description": "Test HTML articles downloaded from specific CDC URLs",
+  "download_stats": {
+    "total_urls": 26,
+    "successful_downloads": 26,
+    "failed_downloads": 0
+  },
+  "downloaded_files": [
+    "mmwr_volumes_68_wr_mm6844e1.htm",
+    "mmwr_preview_mmwrhtml_mm6452a3.htm",
+    "mmwr_volumes_72_ss_ss7208a1.htm",
+    "mmwr_preview_mmwrhtml_mm5648a6.htm",
+    "mmwr_preview_mmwrhtml_rr5416a1.htm",
+    "mmwr_preview_mmwrhtml_mm5650a4.htm",
+    "mmwr_preview_mmwrhtml_mm5649a2.htm",
+    "mmwr_preview_mmwrhtml_mm5650a1.htm",
+    "mmwr_volumes_71_wr_mm7153a1.htm",
+    "mmwr_volumes_71_wr_mm715152a2.htm",
+    "mmwr_volumes_71_wr_mm7150a5.htm",
+    "mmwr_volumes_71_wr_mm7150a8.htm",
+    "mmwr_volumes_71_wr_mm7150a8.htm",
+    "eid_article_11_10_05-0508_article.htm",
+    "eid_article_21_8_14-1251_article.htm",
+    "eid_article_21_8_14-0956_article.htm",
+    "eid_article_21_8_et-2108_article.htm",
+    "eid_article_21_8_15-0423_article.htm",
+    "eid_article_18_5_11-1275_article.htm",
+    "eid_article_18_5_11-1111_article.htm",
+    "pcd_issues_2021_20_0601.htm",
+    "pcd_issues_2021_20_0596.htm",
+    "pcd_issues_2021_20_0615.htm",
+    "pcd_issues_2015_15_0290.htm",
+    "pcd_issues_2014_14_0289.htm",
+    "pcd_issues_2019_19_0123.htm"
+  ],
+  "failed_urls": []
+}

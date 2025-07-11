@@ -1,0 +1,40 @@
+{
+    "articles": [
+        {
+            "file": "pcd_issues_2014_14_0289.htm",
+            "url": "https://www.cdc.gov/pcd/issues/2014/14_0289.htm",
+            "title": "Importance of Nutrition Visits After Gastric Bypass Surgery for American Veterans, San Francisco, 2004–2010",
+            "abstract": "Introduction Nutrition counseling is important for veterans undergoing gastric bypass surgery. The aim of this study was to explore the relationship between the number of nutrition visits a patient attended and change in body mass index (BMI) after gastric bypass surgery for the veteran population. Methods A retrospective study examined veterans (N = 79) who underwent Roux-en-Y gastric bypass surgery from June 2004 through July 2010. Spearman's correlation and multivariate regression analysis were used to analyze data. Results A significant correlation was found between the number of postoperative nutrition visits and the change in postsurgery BMI at 2 years (Spearman's ρ = 0.21; P = .017). After adjusting for age, sex, and race, the association between postsurgery nutrition visits and BMI change persisted (β = 0.255; 95% confidence interval, 0.015–0.581; P = .039). Conclusion Veterans with more nutrition visits following Roux-en-Y gastric bypass surgery experienced greater declines in BMI. This finding underscores the importance of the dietitian on the bariatric surgery team."
+        },
+        {
+            "file": "pcd_issues_2015_15_0290.htm",
+            "url": "https://www.cdc.gov/pcd/issues/2015/15_0290.htm",
+            "title": "Consumption of Alcoholic Beverages and Liquor Consumption by Michigan High School Students, 2011",
+            "abstract": "Introduction Excessive alcohol consumption was responsible for approximately 4,300 annual deaths in the United States among people younger than 21 from 2006 through 2010. Underage drinking cost the United States $24.6 billion in 2006. Previous studies have shown that liquor is the most common type of alcohol consumed by high school students. However, little is known about the types of liquor consumed by youth or about the mixing of alcohol with energy drinks. Methods The 2011 Michigan Youth Tobacco Survey was used to assess usual alcohol beverage consumption and liquor consumption and the mixing of alcohol with energy drinks by Michigan high school students. Beverage preferences were analyzed by demographic characteristics and drinking patterns. Results Overall, 34.2% of Michigan high school students consumed alcohol in the past month, and 20.8% reported binge drinking. Among current drinkers, liquor was the most common type of alcohol consumed (51.2%), and vodka was the most prevalent type of liquor consumed by those who drank liquor (53.0%). The prevalence of liquor consumption was similar among binge drinkers and nonbinge drinkers, but binge drinkers who drank liquor were significantly more likely than nonbinge drinkers to consume vodka and to mix alcohol with energy drinks (49.0% vs 18.2%, respectively). Conclusions Liquor is the most common type of alcoholic beverage consumed by Michigan high school students; vodka is the most common type of liquor consumed. Mixing alcohol and energy drinks is common, particularly among binge drinkers. Community Guide strategies for reducing excessive drinking (eg, increasing alcohol taxes) can reduce underage drinking."
+        },
+        {
+            "file": "pcd_issues_2019_19_0123.htm",
+            "url": "https://www.cdc.gov/pcd/issues/2019/19_0123.htm",
+            "title": "PCD Disseminates Public Health Interventions Addressing Chronic Disease Prevention and Health Promotion",
+            "abstract": ""
+        },
+        {
+            "file": "pcd_issues_2021_20_0596.htm",
+            "url": "https://www.cdc.gov/pcd/issues/2021/20_0596.htm",
+            "title": "Interest in Receiving Nutrition Information Through Social Media Among Food-Security Program Participants in Washington, DC",
+            "abstract": "Introduction Effective communication approaches are necessary to reach food-security program participants. Accessing food-security programs has been especially challenging during the COVID-19 pandemic. Social media can play an important role in reducing some communication barriers. We examined interest in receiving nutrition information via social media among adults participating in food-security programs in Washington, DC. Methods We developed and administered a 22-item survey to adults participating in food-security programs (N = 375). Participants were recruited at Martha's Table, in Washington, DC, from January through March 2020. We performed bivariate analyses and multinomial logistic regressions to examine predictors of interest in receiving nutrition information via social media. Results Sixty-nine percent of participants reported using social media, and 49% expressed interest in receiving nutrition information via social media. Higher levels of self-efficacy and belief in the value of digital technology were associated with greater likelihood of interest in receiving nutrition information via social media (χ26 = 139.0; Nagelkerke R2 = 0.35; P < .001). We found no differences by sex or digital technology access in interest in receiving nutrition information via social media. Conclusion Social media is a widely used and a feasible method to reach food-security program participants. Understanding program participants' interest in receiving health information via social media may help food-security programs plan effective communication strategies to improve food security, especially when in-person participation is limited, such as during the COVID-19 pandemic."
+        },
+        {
+            "file": "pcd_issues_2021_20_0601.htm",
+            "url": "https://www.cdc.gov/pcd/issues/2021/20_0601.htm",
+            "title": "Geographic Clustering of Fast-Food Restaurants Around Secondary Schools in Hong Kong",
+            "abstract": "Introduction Clustering of fast-food restaurants around schools facilitates fast-food consumption among students, which may cause obesity. We examined the prevalence of fast-food restaurants and identified the clusters of fast-food restaurants near secondary schools in Hong Kong. Methods We collected data of Western fast-food chain restaurants and 490 secondary schools in Hong Kong. Descriptive statistics and buffer analysis identified the prevalence of fast-food restaurants around the secondary schools within 400-m and 800-m buffers. Additional analyses compared schools stratified by the 3 main regions in Hong Kong, district-level population density, and median monthly household income. We used Getis-Ord GI* hot spot analysis to measure spatial clusters of fast-food restaurants around schools and Global Moran's I to measure the spatial autocorrelation based on each school and the number of fast-food restaurants within the 400-m buffer. Results The average number of fast-food restaurants within 400 m and 800 m of a school was 2.0 and 6.3, respectively. Seven in 10 secondary schools had at least 1 fast-food restaurant within 400 m. The number of schools with no fast-food restaurants was higher in Hong Kong Island, considered the \"rich region\" in Hong Kong. Hot spots of clusters were significantly located in the high-density downtown areas. We observed significant spatial autocorrelation between fast-food restaurants and secondary schools in the areas with high density, low income, and high income (P < .001, z > 2.58). Conclusion Fast-food restaurants were substantially clustered around secondary schools in Hong Kong. Territory-wide studies about the health effect of fast-food clusters around schools on children and adolescents are warranted in Hong Kong."
+        },
+        {
+            "file":"pcd_issues_2021_20_0615.htm",
+            "url":"https://www.cdc.gov/pcd/issues/2021/20_0615.htm",
+            "title":"A Comparison of Community Resources for Chinese Immigrants Across Philadelphia Neighborhoods",
+            "abstract":""
+        }
+    ]
+}
