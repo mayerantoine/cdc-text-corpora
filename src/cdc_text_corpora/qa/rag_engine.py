@@ -95,7 +95,7 @@ class RAGEngine:
         # Initialize embeddings
         self.embeddings = HuggingFaceEmbeddings(
             model_name=self.embedding_model_name,
-            show_progress=False
+            show_progress=True
         )
         
         # Initialize ChromaDB vector store
@@ -318,14 +318,12 @@ Answer:"""
         
         # Create new vector store from documents
         print("🔍 Creating vector database with embeddings...")
-        self.vectorstore = self._show_progress_for_operation(
-            "Creating embeddings",
-            "🔍",
-            lambda: Chroma.from_documents(
-                documents=chunked_documents,
-                embedding=self.embeddings,
-                persist_directory=self.persist_directory
-            )
+        print(f"   Processing {total_chunks} chunks with {self.embedding_model_name}...")
+        
+        self.vectorstore = Chroma.from_documents(
+            documents=chunked_documents,
+            embedding=self.embeddings,
+            persist_directory=self.persist_directory
         )
         
         # Update retriever

@@ -59,12 +59,14 @@ class ArticleValidator:
         """Validate a single article against all rules."""
         issues = []
         
+
         # Run all validation checks
         issues.extend(self._validate_title(article))
         issues.extend(self._validate_urls(article))
         issues.extend(self._validate_url_format(article))
         issues.extend(self._validate_authors(article))
-        issues.extend(self._validate_content(article))
+        issues.extend(self._validate_full_text(article))
+        issues.extend(self._validate_html_text(article))
         issues.extend(self._validate_collection(article))
         issues.extend(self._validate_language(article))
         
@@ -105,6 +107,7 @@ class ArticleValidator:
         """Validate URL requirements."""
         issues = []
         
+      
         if not article.url:
             issues.append(ValidationIssue(
                 field="url",
@@ -113,7 +116,8 @@ class ArticleValidator:
                 value=article.url
             ))
         
-        if not article.relative_url:
+        if not article.relative_url or not article.relative_url.strip():
+            print("not FOUND:",article.relative_url)
             issues.append(ValidationIssue(
                 field="relative_url",
                 severity=ValidationSeverity.ERROR,
@@ -191,8 +195,8 @@ class ArticleValidator:
         
         return issues
     
-    def _validate_content(self, article: Article) -> List[ValidationIssue]:
-        """Validate content requirements."""
+    def _validate_full_text(self, article: Article) -> List[ValidationIssue]:
+        """Validate full_text content requirements."""
         issues = []
         
         if not article.full_text:
@@ -209,6 +213,12 @@ class ArticleValidator:
                 message="Article full_text is very short (less than 100 characters)",
                 value=f"Length: {len(article.full_text)}"
             ))
+        
+        return issues
+    
+    def _validate_html_text(self, article: Article) -> List[ValidationIssue]:
+        """Validate html_text content requirements."""
+        issues = []
         
         if not article.html_text:
             issues.append(ValidationIssue(

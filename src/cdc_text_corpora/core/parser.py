@@ -29,7 +29,7 @@ class Article:
     references: List[str] = field(default_factory=list)
     html_text: str = ""
     url: str = ""
-    relative_url: str = ""
+    relative_url: str = "" # current relative path of the htm file
     journal: str = ""
     language: str = ""
     authors: List[str] = field(default_factory=list)
@@ -502,8 +502,17 @@ class CDCArticleParser(ABC):
         """Parse a single article from HTML content."""
         article = Article()
         
+        # Ensure relative_url is not empty and is a valid path
+        if not relative_url or not relative_url.strip():
+            raise ValueError(f"relative_url cannot be empty for article parsing")
+        
+        # Validate that relative_url looks like a valid file path
+        relative_url_clean = relative_url.strip()
+        if not relative_url_clean.endswith(('.htm', '.html')):
+            raise ValueError(f"relative_url must be an HTML file path, got: {relative_url_clean}")
+        
         # Set basic metadata
-        article.relative_url = relative_url
+        article.relative_url = relative_url.strip()
         article.url = self.parse_url(html, relative_url)
         article.journal = self.journal
         article.language = self.language
@@ -547,6 +556,12 @@ class CDCArticleParser(ABC):
         
         for relative_url, html in tqdm(filtered_html.items(), desc=f"Parsing {self.journal} articles"):
             try:
+                # Skip articles with empty or invalid relative URLs
+                if not relative_url or not relative_url.strip():
+                    print(f"Skipping article with empty relative_url")
+                    failed_parses += 1
+                    continue
+                
                 article = self.parse_article(relative_url, html)
                 articles[relative_url] = article
                 successful_parses += 1
@@ -911,12 +926,30 @@ class PCDArticleParser(CDCArticleParser):
         
         # Try to find title in h1 tags (common in PCD)
         title = selector.xpath('//h1/text()').get()
-        if title:
+        if title and title.strip():
             return title.strip()
         
         # Fallback - try first heading of any type
         title = selector.xpath('(//*[self::h1 or self::h2 or self::h3])[1]/text()').get()
-        if title:
+        if title and title.strip():
+            return title.strip()
+        
+        # Try to get text after span in h1 (for older PCD articles)
+        title_after_span = selector.xpath('//h1/span/following-sibling::text()').getall()
+        if title_after_span:
+            title = ' '.join(title_after_span).strip()
+            # Normalize whitespace (replace multiple spaces/tabs/newlines with single space)
+            title = ' '.join(title.split())
+            if title:
+                return title
+        
+        # Final fallback - use normalize-space to get all text content from headings
+        title = selector.xpath('normalize-space(//h1)').get()
+        if title and title.strip():
+            return title.strip()
+        
+        title = selector.xpath('normalize-space((//*[self::h1 or self::h2 or self::h3])[1])').get()
+        if title and title.strip():
             return title.strip()
         
         return ""
@@ -953,6 +986,30 @@ class PCDArticleParser(CDCArticleParser):
                 clean_name = self.clean_author_name(author)
                 if clean_name and len(clean_name.split()) >= 2:
                     authors.append(clean_name)
+        
+        # Fallback - try h4 without class requirement
+        if not authors:
+            author_tags = selector.xpath("//h4//text()").getall()
+            if author_tags:
+                raw_authors = []
+                current_author = []
+                for tag in author_tags:
+                    if tag.strip():
+                        if ',' in tag or 'and' in tag.lower():
+                            # Split on delimiters and add to raw_authors
+                            parts = re.split(r'[,;]|\band\b', tag)
+                            raw_authors.extend(parts)
+                        else:
+                            current_author.append(tag)
+                
+                if current_author:
+                    raw_authors.append(' '.join(current_author))
+                
+                # Clean each author name
+                for author in raw_authors:
+                    clean_name = self.clean_author_name(author)
+                    if clean_name and len(clean_name.split()) >= 2:
+                        authors.append(clean_name)
         
         return authors
     

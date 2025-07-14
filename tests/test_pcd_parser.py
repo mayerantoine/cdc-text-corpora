@@ -66,13 +66,16 @@ class TestPCDParser:
         "pcd_issues_2019_19_0123.htm",
         "pcd_issues_2021_20_0596.htm",
         "pcd_issues_2021_20_0601.htm",
-        "pcd_issues_2021_20_0615.htm"
+        "pcd_issues_2021_20_0615.htm",
+        "pcd_issues_2008_06_0131.htm",
+        "pcd_issues_2011_10_0103.htm"
     ])
     def test_pcd_parser_basic_fields(self, parser, test_data_dir, pcd_expected_outputs, filename):
         """Test that PCD parser correctly extracts basic fields (url, title, abstract)."""
-        # Convert filename to expected URL path (e.g., pcd_issues_2014_14_0289.htm -> pcd/issues/2014/14_0289.htm)
-        parts = filename.replace("pcd_issues_", "").replace(".htm", "").split("_")
-        expected_url_path = f"pcd/issues/{parts[0]}/{parts[1]}_{parts[2]}.htm"
+        # Convert filename to expected URL path based on expected URL in JSON
+        expected = pcd_expected_outputs[filename]
+        # Extract relative URL from expected full URL
+        expected_url_path = expected['url'].replace("https://www.cdc.gov/", "")
         
         # Load the HTML file
         html_file = test_data_dir / "pcd" / "html" / filename
@@ -81,8 +84,6 @@ class TestPCDParser:
         # Parse the article
         article = parser.parse_article(expected_url_path, html_content)
         
-        # Get expected output for this file
-        expected = pcd_expected_outputs[filename]
         
         # Assert URL
         assert article.url == expected['url'], f"Expected URL: {expected['url']}, got: {article.url}"
@@ -106,13 +107,15 @@ class TestPCDParser:
         "pcd_issues_2019_19_0123.htm",
         "pcd_issues_2021_20_0596.htm",
         "pcd_issues_2021_20_0601.htm",
-        "pcd_issues_2021_20_0615.htm"
+        "pcd_issues_2021_20_0615.htm",
+        "pcd_issues_2008_06_0131.htm",
+        "pcd_issues_2011_10_0103.htm"
     ])
-    def test_pcd_parser_metadata(self, parser, test_data_dir, filename):
+    def test_pcd_parser_metadata(self, parser, test_data_dir, pcd_expected_outputs, filename):
         """Test that PCD parser correctly sets metadata fields."""
-        # Convert filename to expected URL path
-        parts = filename.replace("pcd_issues_", "").replace(".htm", "").split("_")
-        expected_url_path = f"pcd/issues/{parts[0]}/{parts[1]}_{parts[2]}.htm"
+        # Get expected URL path from JSON
+        expected = pcd_expected_outputs[filename]
+        expected_url_path = expected['url'].replace("https://www.cdc.gov/", "")
         
         html_file = test_data_dir / "pcd" / "html" / filename
         html_content = self._load_html_file(html_file)
@@ -131,13 +134,15 @@ class TestPCDParser:
         "pcd_issues_2019_19_0123.htm",
         "pcd_issues_2021_20_0596.htm",
         "pcd_issues_2021_20_0601.htm",
-        "pcd_issues_2021_20_0615.htm"
+        "pcd_issues_2021_20_0615.htm",
+        "pcd_issues_2008_06_0131.htm",
+        "pcd_issues_2011_10_0103.htm"
     ])
-    def test_pcd_parser_content_not_empty(self, parser, test_data_dir, filename):
+    def test_pcd_parser_content_not_empty(self, parser, test_data_dir, pcd_expected_outputs, filename):
         """Test that PCD parser extracts non-empty content."""
-        # Convert filename to expected URL path
-        parts = filename.replace("pcd_issues_", "").replace(".htm", "").split("_")
-        expected_url_path = f"pcd/issues/{parts[0]}/{parts[1]}_{parts[2]}.htm"
+        # Get expected URL path from JSON
+        expected = pcd_expected_outputs[filename]
+        expected_url_path = expected['url'].replace("https://www.cdc.gov/", "")
         
         html_file = test_data_dir / "pcd" / "html" / filename
         html_content = self._load_html_file(html_file)
@@ -158,13 +163,15 @@ class TestPCDParser:
         "pcd_issues_2019_19_0123.htm",
         "pcd_issues_2021_20_0596.htm",
         "pcd_issues_2021_20_0601.htm",
-        "pcd_issues_2021_20_0615.htm"
+        "pcd_issues_2021_20_0615.htm",
+        "pcd_issues_2008_06_0131.htm",
+        "pcd_issues_2011_10_0103.htm"
     ])
-    def test_pcd_parser_return_type(self, parser, test_data_dir, filename):
+    def test_pcd_parser_return_type(self, parser, test_data_dir, pcd_expected_outputs, filename):
         """Test that PCD parser returns an Article object."""
-        # Convert filename to expected URL path
-        parts = filename.replace("pcd_issues_", "").replace(".htm", "").split("_")
-        expected_url_path = f"pcd/issues/{parts[0]}/{parts[1]}_{parts[2]}.htm"
+        # Get expected URL path from JSON
+        expected = pcd_expected_outputs[filename]
+        expected_url_path = expected['url'].replace("https://www.cdc.gov/", "")
         
         html_file = test_data_dir / "pcd" / "html" / filename
         html_content = self._load_html_file(html_file)
@@ -205,15 +212,17 @@ def test_pcd_parser_standalone():
         "pcd_issues_2019_19_0123.htm",
         "pcd_issues_2021_20_0596.htm",
         "pcd_issues_2021_20_0601.htm",
-        "pcd_issues_2021_20_0615.htm"
+        "pcd_issues_2021_20_0615.htm",
+        "pcd_issues_2008_06_0131.htm",
+        "pcd_issues_2011_10_0103.htm"
     ]
     
     all_success = True
     
     for filename in test_files:
-        # Convert filename to expected URL path
-        parts = filename.replace("pcd_issues_", "").replace(".htm", "").split("_")
-        relative_url = f"pcd/issues/{parts[0]}/{parts[1]}_{parts[2]}.htm"
+        # Get expected URL path from JSON
+        expected = expected_outputs[filename]
+        relative_url = expected['url'].replace("https://www.cdc.gov/", "")
         
         print(f"{'='*60}")
         print(f"TESTING PCD: {filename}")
