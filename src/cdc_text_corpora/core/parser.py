@@ -208,7 +208,8 @@ class HTMLArticleLoader:
                     zip_obj.extractall(html_dir)
 
 
-
+# TODO add a new module wtih a class that extends CDCArticleParser , but also create a VectorStore to index each parsed articles
+# overwrite parsed all articles with its own method, no intermediate json parsed file
 class CDCArticleParser(ABC):
     """Base class for CDC article parsers with common functionality."""
 
