@@ -1,22 +1,19 @@
 """
-Direct HTML to Vector Store Processing Module.
+HTML to Vector Store Indexing Module.
 
-This module provides a streamlined pipeline that processes HTML files directly
+This module provides a streamlined pipeline that indexes HTML files directly
 into a vector store without intermediate JSON storage. The workflow:
 1. Unzip HTML collections
 2. Parse HTML articles in memory
 3. Index directly to vector store in batches
 """
 
-from typing import Dict, List, Optional, Union, Iterator, Tuple, Any
+from typing import Dict, List, Optional, Union, Any
 from dataclasses import dataclass
 from pathlib import Path
-import os
 import zipfile
 from tqdm.auto import tqdm
 import tempfile
-import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 # Import existing components
@@ -24,13 +21,11 @@ from cdc_text_corpora.core.parser import (
     CDCArticleParser, 
     Article, 
     CDCCollections,
-    create_parser,
-    HTMLArticleLoader
+    create_parser
 )
 from cdc_text_corpora.utils.config import get_data_directory, get_collection_zip_path
-from cdc_text_corpora.qa.rag_engine import RAGEngine
 
-# LangChain components for direct indexing
+# LangChain components for indexing
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -38,10 +33,10 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 @dataclass
-class ProcessingConfig:
-    """Configuration for direct processing pipeline."""
+class IndexConfig:
+    """Configuration for article indexing pipeline."""
     
-    # Processing settings
+    # Indexing settings
     batch_size: int = 50
     max_workers: int = 4
     chunk_size: int = 1000
@@ -52,15 +47,15 @@ class ProcessingConfig:
     persist_directory: Optional[str] = None
     collection_name: str = "cdc_articles"
     
-    # Processing options
+    # Indexing options
     validate_articles: bool = True
     skip_existing: bool = True
     progress_bar: bool = True
 
 
 @dataclass 
-class ProcessingStats:
-    """Statistics for processing run."""
+class IndexStats:
+    """Statistics for indexing run."""
     
     total_files: int = 0
     processed_files: int = 0
@@ -75,9 +70,9 @@ class ProcessingStats:
             self.errors = []
 
 
-class DirectProcessor:
+class ArticleIndexer:
     """
-    Direct HTML to Vector Store processor.
+    HTML to Vector Store article indexer.
     
     This class handles the complete pipeline from downloaded ZIP files
     to indexed vector store without intermediate JSON files.
@@ -85,17 +80,17 @@ class DirectProcessor:
     
     def __init__(
         self,
-        config: Optional[ProcessingConfig] = None,
+        config: Optional[IndexConfig] = None,
         data_dir: Optional[str] = None
     ):
         """
-        Initialize the direct processor.
+        Initialize the article indexer.
         
         Args:
-            config: Processing configuration. If None, uses defaults.
+            config: Indexing configuration. If None, uses defaults.
             data_dir: Custom data directory. If None, uses default.
         """
-        self.config = config or ProcessingConfig()
+        self.config = config or IndexConfig()
         self.data_dir = Path(data_dir) if data_dir else get_data_directory()
         
         # Set up persistence directory
@@ -134,20 +129,20 @@ class DirectProcessor:
             persist_directory=self.config.persist_directory
         )
     
-    def process_collection(
+    def index_collection(
         self,
         collection: Union[str, CDCCollections],
         language: Optional[str] = None
-    ) -> ProcessingStats:
+    ) -> IndexStats:
         """
-        Process a complete collection from ZIP to vector store.
+        Index a complete collection from ZIP to vector store.
         
         Args:
             collection: Collection name ('pcd', 'eid', 'mmwr') or CDCCollections enum
-            language: Language filter ('en', 'es', 'fr', 'zhs', 'zht'). If None, processes all.
+            language: Language filter ('en', 'es', 'fr', 'zhs', 'zht'). If None, indexes all.
             
         Returns:
-            ProcessingStats with results summary
+            IndexStats with results summary
         """
         import time
         start_time = time.time()
@@ -160,7 +155,7 @@ class DirectProcessor:
             collection_enum = collection
             collection = collection.value
         
-        stats = ProcessingStats()
+        stats = IndexStats()
         
         try:
             # Check if ZIP file exists
@@ -169,7 +164,7 @@ class DirectProcessor:
                 raise FileNotFoundError(f"ZIP file not found: {zip_path}")
             
             # Process the collection
-            self.logger.info(f"Starting direct processing of {collection.upper()} collection")
+            self.logger.info(f"Starting indexing of {collection.upper()} collection")
             
             with tempfile.TemporaryDirectory() as temp_dir:
                 # Extract ZIP to temporary directory
@@ -185,14 +180,14 @@ class DirectProcessor:
                     return stats
                 
                 # Process files in batches
-                stats = self._process_html_files_batch(
+                stats = self._index_html_files_batch(
                     html_files, 
                     collection_enum, 
                     stats
                 )
         
         except Exception as e:
-            error_msg = f"Failed to process collection {collection}: {e}"
+            error_msg = f"Failed to index collection {collection}: {e}"
             self.logger.error(error_msg)
             stats.errors.append(error_msg)
         
@@ -222,7 +217,6 @@ class DirectProcessor:
                 html_files.append(html_file)
             else:
                 # Filter by language using file path conventions
-                # This assumes language is encoded in the path structure
                 if self._matches_language_filter(html_file, language):
                     html_files.append(html_file)
         
@@ -231,7 +225,6 @@ class DirectProcessor:
     def _matches_language_filter(self, html_file: Path, language: str) -> bool:
         """Check if HTML file matches language filter."""
         # Simple heuristic based on path structure
-        # This can be enhanced based on actual file organization
         file_str = str(html_file).lower()
         
         language_patterns = {
@@ -245,21 +238,19 @@ class DirectProcessor:
         patterns = language_patterns.get(language.lower(), [])
         return any(pattern in file_str for pattern in patterns) if patterns else True
     
-    def _process_html_files_batch(
+    def _index_html_files_batch(
         self,
         html_files: List[Path],
         collection: CDCCollections,
-        stats: ProcessingStats
-    ) -> ProcessingStats:
-        """Process HTML files in batches."""
+        stats: IndexStats
+    ) -> IndexStats:
+        """Index HTML files in batches."""
         
         # Create parser for this collection
         parser = create_parser(collection.value)
         
         # Process files in batches
-        total_batches = (len(html_files) + self.config.batch_size - 1) // self.config.batch_size
-        
-        progress_desc = f"Processing {collection.value.upper()} files"
+        progress_desc = f"Indexing {collection.value.upper()} files"
         
         if self.config.progress_bar:
             file_progress = tqdm(
@@ -270,7 +261,7 @@ class DirectProcessor:
         
         for i in range(0, len(html_files), self.config.batch_size):
             batch_files = html_files[i:i + self.config.batch_size]
-            batch_stats = self._process_batch(batch_files, parser, collection)
+            batch_stats = self._index_batch(batch_files, parser, collection)
             
             # Update stats
             stats.processed_files += batch_stats.processed_files
@@ -287,14 +278,14 @@ class DirectProcessor:
         
         return stats
     
-    def _process_batch(
+    def _index_batch(
         self,
         html_files: List[Path],
         parser: CDCArticleParser,
         collection: CDCCollections
-    ) -> ProcessingStats:
-        """Process a batch of HTML files."""
-        batch_stats = ProcessingStats()
+    ) -> IndexStats:
+        """Index a batch of HTML files."""
+        batch_stats = IndexStats()
         documents = []
         
         # Parse HTML files to articles
@@ -465,18 +456,18 @@ class DirectProcessor:
             return False
 
 
-def create_direct_processor(
-    config: Optional[ProcessingConfig] = None,
+def create_article_indexer(
+    config: Optional[IndexConfig] = None,
     data_dir: Optional[str] = None
-) -> DirectProcessor:
+) -> ArticleIndexer:
     """
-    Factory function to create DirectProcessor instance.
+    Factory function to create ArticleIndexer instance.
     
     Args:
-        config: Processing configuration
+        config: Indexing configuration
         data_dir: Custom data directory
         
     Returns:
-        DirectProcessor instance
+        ArticleIndexer instance
     """
-    return DirectProcessor(config=config, data_dir=data_dir)
+    return ArticleIndexer(config=config, data_dir=data_dir)

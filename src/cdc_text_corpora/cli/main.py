@@ -15,7 +15,7 @@ from cdc_text_corpora.utils.config import get_data_directory
 from cdc_text_corpora.qa.rag_engine import RAGEngine
 from cdc_text_corpora.qa.rag_pipeline import RAGPipeline
 from cdc_text_corpora.qa.rag_agent import AgenticRAG, AgentConfig
-from cdc_text_corpora.processing import DirectProcessor, ProcessingConfig
+from cdc_text_corpora.index import ArticleIndexer, IndexConfig
 
 
 app = typer.Typer(
@@ -411,12 +411,12 @@ def qa(
         raise typer.Exit(1)
 
 @app.command()
-def process(
+def index(
     collection: str = typer.Option(
         "all",
         "--collection",
         "-c", 
-        help="Collection to process: pcd, eid, mmwr, or all"
+        help="Collection to index: pcd, eid, mmwr, or all"
     ),
     language: str = typer.Option(
         "all",
@@ -428,7 +428,7 @@ def process(
         50,
         "--batch-size",
         "-b",
-        help="Number of files to process in each batch"
+        help="Number of files to index in each batch"
     ),
     chunk_size: int = typer.Option(
         1000,
@@ -443,7 +443,7 @@ def process(
     clear_existing: bool = typer.Option(
         False,
         "--clear-existing",
-        help="Clear existing vector store before processing"
+        help="Clear existing vector store before indexing"
     ),
     data_dir: str = typer.Option(
         None,
@@ -458,7 +458,7 @@ def process(
         help="Show verbose output"
     )
 ) -> None:
-    """Direct processing from HTML to vector store without intermediate JSON files."""
+    """Index HTML articles directly to vector store without intermediate JSON files."""
     
     # Validate collection input
     valid_collections = ["pcd", "eid", "mmwr", "all"]
@@ -475,21 +475,21 @@ def process(
         raise typer.Exit(1)
     
     try:
-        # Display processing info
+        # Display indexing info
         console.print(Panel(
-            f"[bold blue]Direct HTML to Vector Store Processing[/bold blue]\n"
+            f"[bold blue]HTML to Vector Store Indexing[/bold blue]\n"
             f"Collection: {collection}\n"
             f"Language: {language}\n"
             f"Batch size: {batch_size}\n"
             f"Chunk size: {chunk_size}\n" 
             f"Skip existing: {'Yes' if skip_existing else 'No'}\n"
             f"Clear existing: {'Yes' if clear_existing else 'No'}",
-            title="Direct Processing Configuration",
+            title="Article Indexing Configuration",
             border_style="blue"
         ))
         
-        # Create processing configuration
-        config = ProcessingConfig(
+        # Create indexing configuration
+        config = IndexConfig(
             batch_size=batch_size,
             chunk_size=chunk_size,
             skip_existing=skip_existing,
@@ -497,13 +497,13 @@ def process(
             validate_articles=True
         )
         
-        # Initialize direct processor
-        processor = DirectProcessor(config=config, data_dir=data_dir)
+        # Initialize article indexer
+        indexer = ArticleIndexer(config=config, data_dir=data_dir)
         
         # Clear existing vector store if requested
         if clear_existing:
             console.print("[yellow]🗑️  Clearing existing vector store...[/yellow]")
-            if processor.clear_vectorstore():
+            if indexer.clear_vectorstore():
                 console.print("[green]✅ Vector store cleared successfully[/green]")
             else:
                 console.print("[red]❌ Failed to clear vector store[/red]")
@@ -516,25 +516,25 @@ def process(
         total_chunks = 0
         
         for coll in collections_to_process:
-            console.print(f"\n[bold cyan]🔄 Processing {coll.upper()} collection...[/bold cyan]")
+            console.print(f"\n[bold cyan]🔄 Indexing {coll.upper()} collection...[/bold cyan]")
             
-            # Process collection
+            # Index collection
             language_param = None if language.lower() == 'all' else language.lower()
-            stats = processor.process_collection(coll, language_param)
+            stats = indexer.index_collection(coll, language_param)
             
             # Display results
             if stats.errors:
-                console.print(f"[yellow]⚠️  {len(stats.errors)} errors occurred during processing[/yellow]")
+                console.print(f"[yellow]⚠️  {len(stats.errors)} errors occurred during indexing[/yellow]")
                 if verbose:
                     for error in stats.errors[:5]:  # Show first 5 errors
                         console.print(f"[dim red]  • {error}[/dim red]")
                     if len(stats.errors) > 5:
                         console.print(f"[dim]  ... and {len(stats.errors) - 5} more errors[/dim]")
             
-            console.print(f"[green]✅ {coll.upper()} processing complete![/green]")
+            console.print(f"[green]✅ {coll.upper()} indexing complete![/green]")
             console.print(f"[green]  • Processed: {stats.processed_files} files[/green]")
             console.print(f"[green]  • Indexed: {stats.total_chunks} chunks[/green]")
-            console.print(f"[green]  • Processing time: {stats.processing_time:.1f}s[/green]")
+            console.print(f"[green]  • Indexing time: {stats.processing_time:.1f}s[/green]")
             
             if stats.skipped_files > 0:
                 console.print(f"[yellow]  • Skipped: {stats.skipped_files} files (already indexed)[/yellow]")
@@ -545,17 +545,17 @@ def process(
             total_chunks += stats.total_chunks
         
         # Final summary
-        console.print(f"\n[bold green]🎉 Direct processing complete![/bold green]")
+        console.print(f"\n[bold green]🎉 Article indexing complete![/bold green]")
         console.print(f"[green]Total files processed: {total_processed}[/green]")
         console.print(f"[green]Total chunks indexed: {total_chunks}[/green]")
         
         # Show vector store stats
-        vectorstore_stats = processor.get_vectorstore_stats()
+        vectorstore_stats = indexer.get_vectorstore_stats()
         if "error" not in vectorstore_stats:
             console.print(f"[green]Vector store contains: {vectorstore_stats['total_documents']} documents[/green]")
         
         if verbose:
-            console.print(f"[dim]Vector store location: {processor.config.persist_directory}[/dim]")
+            console.print(f"[dim]Vector store location: {indexer.config.persist_directory}[/dim]")
             
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")

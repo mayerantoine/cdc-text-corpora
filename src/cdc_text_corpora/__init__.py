@@ -2,10 +2,10 @@
 
 from .core.datasets import CDCCorpus
 from .core.parser import Article, CDCCollections
-from .processing import DirectProcessor, ProcessingConfig
+from .index import ArticleIndexer, IndexConfig
 
 __version__ = "0.1.0"
-__all__ = ["CDCCorpus", "Article", "CDCCollections", "DirectProcessor", "ProcessingConfig", "main"]
+__all__ = ["CDCCorpus", "Article", "CDCCollections", "ArticleIndexer", "IndexConfig", "main"]
 
 
 def main() -> None:
