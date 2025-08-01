@@ -365,7 +365,8 @@ Answer:"""
         """
         # Update retriever with new k value
         self.retriever = self.vectorstore.as_retriever(
-            search_type="similarity",
+            #search_type="similarity",
+            search_type="mmr",
             search_kwargs={"k": k}
         )
         
@@ -378,7 +379,8 @@ Answer:"""
             )
         
         # Perform search
-        docs = self.retriever.get_relevant_documents(query)
+        #docs = self.retriever.get_relevant_documents(query)
+        docs = self.retriever.invoke(query)
         
         # Format results
         results = []
