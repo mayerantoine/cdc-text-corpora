@@ -8,11 +8,13 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich import box
 import pathlib
+import asyncio
 from cdc_text_corpora.core.downloader import download_collection
 from cdc_text_corpora.core.datasets import CDCCorpus
 from cdc_text_corpora.utils.config import get_data_directory
 from cdc_text_corpora.qa.rag_engine import RAGEngine
 from cdc_text_corpora.qa.rag_pipeline import RAGPipeline
+from cdc_text_corpora.qa.rag_agent import AgenticRAG, AgentConfig
 
 
 app = typer.Typer(
@@ -21,6 +23,56 @@ app = typer.Typer(
 )
 
 console = Console()
+
+
+def _run_agentic_interactive_loop(agentic_rag, console: Console) -> None:
+    """Run interactive loop for agentic RAG mode."""
+    console.print(Panel(
+        "[bold green]🎯 Interactive Agentic Q&A Session[/bold green]\n"
+        "[dim]Ask research questions. The agents will search, gather evidence, and provide comprehensive answers.\n"
+        "Type 'quit', 'exit', or 'q' to stop.[/dim]",
+        title="Agentic Q&A Mode", 
+        border_style="green"
+    ))
+    
+    question_count = 0
+    
+    while True:
+        try:
+            # Get question from user
+            question = Prompt.ask(f"\n[bold cyan]Research Question #{question_count + 1}[/bold cyan]")
+            
+            # Check for exit commands
+            if question.lower().strip() in ['quit', 'exit', 'q', '']:
+                break
+            
+            # Show processing indicator
+            console.print("[yellow]🔄 Processing with multi-agent system...[/yellow]")
+            
+            # Run async agentic RAG
+            try:
+                answer = asyncio.run(agentic_rag.ask_question(question, max_turns=10))
+                
+                # Display answer
+                console.print(Panel(
+                    answer,
+                    title="🤖 Agentic Answer",
+                    border_style="blue"
+                ))
+                
+                question_count += 1
+                
+            except Exception as e:
+                console.print(f"[red]❌ Error processing question: {e}[/red]")
+                continue
+                
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            console.print(f"[red]❌ Error in interactive loop: {e}[/red]")
+            continue
+    
+    console.print(f"\n[green]👋 Agentic Q&A session ended. Answered {question_count} questions.[/green]")
 
 
 @app.command()
@@ -249,6 +301,12 @@ def qa(
         "-l", 
         help="Language filter: en, es, fr, zhs, zht, or all"
     ),
+    mode: str = typer.Option(
+        "sequential",
+        "--mode",
+        "-m",
+        help="RAG mode: sequential (traditional) or agentic (multi-agent)"
+    ),
     data_dir: str = typer.Option(
         None,
         "--data-dir", 
@@ -262,7 +320,10 @@ def qa(
         help="Show verbose output"
     )
 ) -> None:
-    """Interactive RAG-based question answering for CDC collections."""
+    """Interactive RAG-based question answering for CDC collections.
+    
+    Choose between sequential mode (traditional Q&A) or agentic mode (multi-agent research).
+    """
     
     # Validate collection input
     valid_collections = ["pcd", "eid", "mmwr", "all"]
@@ -278,6 +339,13 @@ def qa(
         console.print(f"[yellow]Valid options: {', '.join(valid_languages)}[/yellow]")
         raise typer.Exit(1)
     
+    # Validate mode input
+    valid_modes = ["sequential", "agentic"]
+    if mode.lower() not in valid_modes:
+        console.print(f"[red]Error: Invalid mode '{mode}'[/red]")
+        console.print(f"[yellow]Valid options: {', '.join(valid_modes)}[/yellow]")
+        raise typer.Exit(1)
+    
     # Convert "all" to None for pipeline
     collection_filter = None if collection.lower() == "all" else collection.lower()
     language_param = None if language.lower() == "all" else language.lower()
@@ -287,6 +355,7 @@ def qa(
         if verbose:
             console.print(Panel(
                 f"[bold blue]Starting RAG Q&A Session[/bold blue]\n"
+                f"Mode: {mode}\n"
                 f"Collection: {collection}\n"
                 f"Language: {language}\n"
                 f"Data directory: {data_dir or 'default'}",
@@ -294,14 +363,42 @@ def qa(
                 border_style="blue"
             ))
         
-        # Create and run pipeline
-        pipeline = RAGPipeline(
-            data_dir=data_dir,
-            collection_filter=collection_filter,
-            language=language_param
-        )
-        
-        pipeline.run()
+        # Create and run appropriate mode
+        if mode.lower() == "sequential":
+            # Use traditional RAGPipeline
+            pipeline = RAGPipeline(
+                data_dir=data_dir,
+                collection_filter=collection_filter,
+                language=language_param
+            )
+            pipeline.run()
+            
+        elif mode.lower() == "agentic":
+            # Use AgenticRAG with interactive wrapper
+            console.print(Panel(
+                "[bold green]🤖 Agentic RAG Mode[/bold green]\n"
+                "[dim]Multi-agent system for advanced research question answering[/dim]",
+                title="Agentic Mode",
+                border_style="green"
+            ))
+            
+            # Initialize corpus and check data availability
+            corpus = CDCCorpus(data_dir=data_dir)
+            
+            # Create agent configuration
+            config = AgentConfig(
+                collection_filter=collection_filter or 'all',
+                relevance_cutoff=8,
+                search_k=10,
+                max_evidence_pieces=5,
+                max_search_attempts=3
+            )
+            
+            # Initialize AgenticRAG
+            agentic_rag = AgenticRAG(corpus=corpus, config=config)
+            
+            # Start interactive loop
+            _run_agentic_interactive_loop(agentic_rag, console)
         
     except KeyboardInterrupt:
         console.print("\n[yellow]👋 Q&A session interrupted by user[/yellow]")
