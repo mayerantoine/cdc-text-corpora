@@ -23,7 +23,7 @@ from cdc_text_corpora.core.parser import (
     CDCCollections,
     create_parser
 )
-from cdc_text_corpora.utils.config import get_data_directory, get_collection_zip_path
+from cdc_text_corpora.utils.config import get_data_directory, get_collection_zip_path, ensure_data_directory
 
 # LangChain components for indexing
 from langchain_core.documents import Document
@@ -91,11 +91,17 @@ class ArticleIndexer:
             data_dir: Custom data directory. If None, uses default.
         """
         self.config = config or IndexConfig()
-        self.data_dir = Path(data_dir) if data_dir else get_data_directory()
+        # Ensure data directory exists
+        if data_dir:
+            self.data_dir = ensure_data_directory(data_dir)
+        else:
+            self.data_dir = ensure_data_directory()
         
         # Set up persistence directory
         if self.config.persist_directory is None:
-            self.config.persist_directory = str(self.data_dir / "chroma_db")
+            chroma_dir = self.data_dir / "chroma_db"
+            chroma_dir.mkdir(exist_ok=True)  # Ensure chroma_db directory exists
+            self.config.persist_directory = str(chroma_dir)
         
         # Initialize components
         self.embeddings = None
