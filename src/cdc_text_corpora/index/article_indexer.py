@@ -1,35 +1,32 @@
 """
-HTML to Vector Store Indexing Module.
+Article Vector Store Indexing Module.
 
-This module provides a streamlined pipeline that indexes HTML files directly
-into a vector store without intermediate JSON storage. The workflow:
-1. Unzip HTML collections
-2. Parse HTML articles in memory
-3. Index directly to vector store in batches
+This module provides indexing functionality for parsed articles into a vector store.
+It uses existing HTMLArticleLoader and parser components for consistency.
 """
 
 from typing import Dict, List, Optional, Union, Any
 from dataclasses import dataclass
-from pathlib import Path
-import zipfile
-from tqdm.auto import tqdm
-import tempfile
 import logging
 
 # Import existing components
 from cdc_text_corpora.core.parser import (
-    CDCArticleParser, 
+    HTMLArticleLoader,
     Article, 
     CDCCollections,
     create_parser
 )
-from cdc_text_corpora.utils.config import get_data_directory, get_collection_zip_path, ensure_data_directory
+from cdc_text_corpora.utils.config import ensure_data_directory
 
 # LangChain components for indexing
-from langchain_core.documents import Document
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+try:
+    from langchain_core.documents import Document
+    from langchain_chroma import Chroma
+    from langchain_huggingface import HuggingFaceEmbeddings
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
 
 
 @dataclass
@@ -72,10 +69,10 @@ class IndexStats:
 
 class ArticleIndexer:
     """
-    HTML to Vector Store article indexer.
+    Article vector store indexer.
     
-    This class handles the complete pipeline from downloaded ZIP files
-    to indexed vector store without intermediate JSON files.
+    This class indexes parsed articles into a vector store using existing
+    HTMLArticleLoader and parser components for consistency.
     """
     
     def __init__(
@@ -90,12 +87,15 @@ class ArticleIndexer:
             config: Indexing configuration. If None, uses defaults.
             data_dir: Custom data directory. If None, uses default.
         """
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError(
+                "LangChain dependencies not available. "
+                "Install with: uv add langchain-core langchain-chroma langchain-huggingface langchain-text-splitters"
+            )
+            
         self.config = config or IndexConfig()
         # Ensure data directory exists
-        if data_dir:
-            self.data_dir = ensure_data_directory(data_dir)
-        else:
-            self.data_dir = ensure_data_directory()
+        self.data_dir = ensure_data_directory(data_dir) if data_dir else ensure_data_directory()
         
         # Set up persistence directory
         if self.config.persist_directory is None:
@@ -141,11 +141,11 @@ class ArticleIndexer:
         language: Optional[str] = None
     ) -> IndexStats:
         """
-        Index a complete collection from ZIP to vector store.
+        Index a complete collection using HTMLArticleLoader and parser.
         
         Args:
             collection: Collection name ('pcd', 'eid', 'mmwr') or CDCCollections enum
-            language: Language filter ('en', 'es', 'fr', 'zhs', 'zht'). If None, indexes all.
+            language: Language filter ('en', 'es', 'fr', 'zhs', 'zht'). If None, uses 'en'.
             
         Returns:
             IndexStats with results summary
@@ -164,33 +164,24 @@ class ArticleIndexer:
         stats = IndexStats()
         
         try:
-            # Check if ZIP file exists
-            zip_path = get_collection_zip_path(collection)
-            if not zip_path.exists():
-                raise FileNotFoundError(f"ZIP file not found: {zip_path}")
-            
-            # Process the collection
             self.logger.info(f"Starting indexing of {collection.upper()} collection")
             
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Extract ZIP to temporary directory
-                extract_path = Path(temp_dir) / collection
-                self._extract_zip(zip_path, extract_path)
-                
-                # Find HTML files to process
-                html_files = self._find_html_files(extract_path, language)
-                stats.total_files = len(html_files)
-                
-                if stats.total_files == 0:
-                    self.logger.warning(f"No HTML files found for {collection}")
-                    return stats
-                
-                # Process files in batches
-                stats = self._index_html_files_batch(
-                    html_files, 
-                    collection_enum, 
-                    stats
-                )
+            # Use HTMLArticleLoader to load HTML files (same as CDCCorpus)
+            loader = HTMLArticleLoader(collection, '', language or 'en')
+            loader.load_from_file()
+            
+            if not loader.articles_html:
+                error_msg = f"No HTML files loaded for {collection}"
+                self.logger.warning(error_msg)
+                stats.errors.append(error_msg)
+                return stats
+            
+            # Index all loaded HTML articles
+            stats = self.index_all_articles(
+                html_articles=loader.articles_html,
+                collection=collection_enum,
+                language=language or 'en'
+            )
         
         except Exception as e:
             error_msg = f"Failed to index collection {collection}: {e}"
@@ -200,179 +191,168 @@ class ArticleIndexer:
         stats.processing_time = time.time() - start_time
         return stats
     
-    def _extract_zip(self, zip_path: Path, extract_path: Path):
-        """Extract ZIP file to specified path."""
-        extract_path.mkdir(parents=True, exist_ok=True)
-        
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_path)
-        
-        self.logger.info(f"Extracted {zip_path} to {extract_path}")
-    
-    def _find_html_files(
-        self, 
-        extract_path: Path, 
-        language: Optional[str] = None
-    ) -> List[Path]:
-        """Find HTML files matching language filter."""
-        html_files = []
-        
-        # Recursively find all HTML files
-        for html_file in extract_path.rglob("*.htm*"):
-            if language is None:
-                html_files.append(html_file)
-            else:
-                # Filter by language using file path conventions
-                if self._matches_language_filter(html_file, language):
-                    html_files.append(html_file)
-        
-        return sorted(html_files)
-    
-    def _matches_language_filter(self, html_file: Path, language: str) -> bool:
-        """Check if HTML file matches language filter."""
-        # Simple heuristic based on path structure
-        file_str = str(html_file).lower()
-        
-        language_patterns = {
-            'en': ['_en_', '/en/', 'english'],
-            'es': ['_es_', '/es/', 'spanish', 'espanol'],
-            'fr': ['_fr_', '/fr/', 'french', 'francais'],
-            'zhs': ['_zhs_', '/zhs/', 'chinese_simplified'],
-            'zht': ['_zht_', '/zht/', 'chinese_traditional']
-        }
-        
-        patterns = language_patterns.get(language.lower(), [])
-        return any(pattern in file_str for pattern in patterns) if patterns else True
-    
-    def _index_html_files_batch(
+    def index_all_articles(
         self,
-        html_files: List[Path],
-        collection: CDCCollections,
-        stats: IndexStats
+        html_articles: Dict[str, str],
+        collection: Union[str, CDCCollections],
+        language: str = 'en'
     ) -> IndexStats:
-        """Index HTML files in batches."""
+        """
+        Index all HTML articles by parsing them and adding to vector store.
+        
+        Args:
+            html_articles: Dictionary of {relative_url: html_content}
+            collection: Collection name or enum
+            language: Language code
+            
+        Returns:
+            IndexStats with indexing results
+        """
+        import time
+        from tqdm.auto import tqdm
+        
+        start_time = time.time()
+        
+        # Normalize collection
+        if isinstance(collection, str):
+            collection = collection.lower()
+            collection_enum = CDCCollections(collection)
+        else:
+            collection_enum = collection
+            collection = collection.value
+        
+        stats = IndexStats()
+        stats.total_files = len(html_articles)
+        
+        if not html_articles:
+            self.logger.warning("No HTML articles provided for indexing")
+            return stats
+        
+        self.logger.info(f"Indexing {len(html_articles)} articles from {collection.upper()}")
         
         # Create parser for this collection
-        parser = create_parser(collection.value)
+        parser = create_parser(collection, '', language, html_articles, validate_articles=self.config.validate_articles)
         
-        # Process files in batches
-        progress_desc = f"Indexing {collection.value.upper()} files"
+        # Parse all articles first
+        parsed_articles, parsing_stats = parser.parse_all_articles()
         
+        if not parsed_articles:
+            error_msg = f"No articles parsed from {collection}"
+            self.logger.warning(error_msg)
+            stats.errors.append(error_msg)
+            return stats
+        
+        # Convert parsed articles to documents and index them
+        all_documents = []
+        
+        progress_desc = f"Converting {collection.upper()} articles to documents"
         if self.config.progress_bar:
-            file_progress = tqdm(
-                total=len(html_files),
-                desc=progress_desc,
-                unit="files"
-            )
+            article_progress = tqdm(parsed_articles.items(), desc=progress_desc)
+        else:
+            article_progress = parsed_articles.items()
         
-        for i in range(0, len(html_files), self.config.batch_size):
-            batch_files = html_files[i:i + self.config.batch_size]
-            batch_stats = self._index_batch(batch_files, parser, collection)
-            
-            # Update stats
-            stats.processed_files += batch_stats.processed_files
-            stats.skipped_files += batch_stats.skipped_files
-            stats.failed_files += batch_stats.failed_files
-            stats.total_chunks += batch_stats.total_chunks
-            stats.errors.extend(batch_stats.errors)
-            
-            if self.config.progress_bar:
-                file_progress.update(len(batch_files))
+        for relative_url, article in article_progress:
+            try:
+                # Convert article to LangChain documents
+                documents = self._article_to_documents(article, relative_url)
+                all_documents.extend(documents)
+                stats.processed_files += 1
+                
+            except Exception as e:
+                error_msg = f"Failed to convert article {relative_url}: {e}"
+                self.logger.error(error_msg)
+                stats.errors.append(error_msg)
+                stats.failed_files += 1
         
-        if self.config.progress_bar:
-            file_progress.close()
+        # Index all documents in batches
+        if all_documents:
+            stats = self._index_documents_batch(all_documents, stats)
         
+        stats.processing_time = time.time() - start_time
         return stats
     
-    def _index_batch(
+    def _index_documents_batch(
         self,
-        html_files: List[Path],
-        parser: CDCArticleParser,
-        collection: CDCCollections
+        documents: List[Document],
+        stats: IndexStats
     ) -> IndexStats:
-        """Index a batch of HTML files."""
-        batch_stats = IndexStats()
-        documents = []
+        """Index documents in batches to vector store."""
+        from tqdm.auto import tqdm
         
-        # Parse HTML files to articles
-        for html_file in html_files:
+        batch_size = self.config.batch_size
+        total_batches = (len(documents) + batch_size - 1) // batch_size
+        
+        progress_desc = f"Indexing {len(documents)} document chunks"
+        if self.config.progress_bar:
+            batch_progress = tqdm(total=total_batches, desc=progress_desc, unit="batches")
+        
+        # Process documents in batches
+        for i in range(0, len(documents), batch_size):
+            batch_docs = documents[i:i + batch_size]
+            
             try:
-                # Check if already indexed (if skip_existing is True)
-                if self.config.skip_existing and self._is_already_indexed(html_file):
-                    batch_stats.skipped_files += 1
-                    continue
+                # Check for existing documents if skip_existing is enabled
+                if self.config.skip_existing:
+                    batch_docs = self._filter_existing_documents(batch_docs)
+                    if not batch_docs:
+                        stats.skipped_files += len(documents[i:i + batch_size])
+                        if self.config.progress_bar:
+                            batch_progress.update(1)
+                        continue
                 
-                # Read and parse HTML
-                article = self._parse_html_file(html_file, parser, collection)
+                # Add documents to vector store
+                self.vectorstore.add_documents(batch_docs)
+                stats.total_chunks += len(batch_docs)
                 
-                if article is None:
-                    batch_stats.failed_files += 1
-                    continue
-                
-                # Convert article to documents
-                article_docs = self._article_to_documents(article, html_file)
-                documents.extend(article_docs)
-                batch_stats.processed_files += 1
+                self.logger.debug(f"Indexed batch {i//batch_size + 1}/{total_batches}: {len(batch_docs)} chunks")
                 
             except Exception as e:
-                error_msg = f"Failed to process {html_file}: {e}"
+                error_msg = f"Failed to index batch {i//batch_size + 1}: {e}"
                 self.logger.error(error_msg)
-                batch_stats.errors.append(error_msg)
-                batch_stats.failed_files += 1
+                stats.errors.append(error_msg)
+                stats.failed_files += len(batch_docs)
+            
+            if self.config.progress_bar:
+                batch_progress.update(1)
         
-        # Index documents in batch
-        if documents:
-            try:
-                self.vectorstore.add_documents(documents)
-                batch_stats.total_chunks = len(documents)
-                self.logger.info(f"Indexed {len(documents)} chunks from {batch_stats.processed_files} articles")
-            except Exception as e:
-                error_msg = f"Failed to index batch: {e}"
-                self.logger.error(error_msg)
-                batch_stats.errors.append(error_msg)
+        if self.config.progress_bar:
+            batch_progress.close()
         
-        return batch_stats
+        self.logger.info(f"Successfully indexed {stats.total_chunks} document chunks")
+        return stats
     
-    def _parse_html_file(
-        self,
-        html_file: Path,
-        parser: CDCArticleParser,
-        collection: CDCCollections
-    ) -> Optional[Article]:
-        """Parse a single HTML file to Article."""
+    def _filter_existing_documents(self, documents: List[Document]) -> List[Document]:
+        """Filter out documents that already exist in vector store."""
+        filtered_docs = []
+        
+        for doc in documents:
+            # Check if document with this source already exists
+            relative_url = doc.metadata.get("relative_url", "")
+            chunk_index = doc.metadata.get("chunk_index", 0)
+            
+            if not self._is_document_indexed(relative_url, chunk_index):
+                filtered_docs.append(doc)
+        
+        return filtered_docs
+    
+    def _is_document_indexed(self, relative_url: str, chunk_index: int) -> bool:
+        """Check if a specific document chunk is already indexed."""
         try:
-            # Read HTML content
-            with open(html_file, 'r', encoding='utf-8', errors='ignore') as f:
-                html_content = f.read()
-            
-            # Parse using collection-specific parser
-            article = parser.parse_article(html_content)
-            
-            # Set collection and relative URL
-            article.collection = collection
-            article.relative_url = str(html_file.name)
-            
-            # Validate if enabled
-            if self.config.validate_articles:
-                if not self._validate_article(article):
-                    self.logger.warning(f"Article validation failed for {html_file}")
-                    return None
-            
-            return article
-            
-        except Exception as e:
-            self.logger.error(f"Failed to parse {html_file}: {e}")
-            return None
+            # Query vector store for documents with this relative_url and chunk_index
+            results = self.vectorstore.similarity_search(
+                query="",  # Empty query
+                k=1,
+                filter={
+                    "relative_url": relative_url,
+                    "chunk_index": chunk_index
+                }
+            )
+            return len(results) > 0
+        except Exception:
+            # If query fails, assume not indexed
+            return False
     
-    def _validate_article(self, article: Article) -> bool:
-        """Basic article validation."""
-        return (
-            bool(article.title.strip()) and
-            bool(article.url or article.relative_url) and
-            bool(article.full_text.strip() or article.abstract.strip())
-        )
-    
-    def _article_to_documents(self, article: Article, html_file: Path) -> List[Document]:
+    def _article_to_documents(self, article: Article, relative_url: str) -> List[Document]:
         """Convert Article to LangChain Documents with chunking."""
         documents = []
         
@@ -400,12 +380,13 @@ class ArticleIndexer:
                 "collection": article.collection.value if article.collection else "unknown",
                 "language": article.language or "unknown",
                 "url": article.url or "",
-                "relative_url": article.relative_url or str(html_file.name),
+                "relative_url": article.relative_url or relative_url,
                 "authors": ", ".join(article.authors) if article.authors else "",
                 "publication_date": article.publication_date or "",
+                "journal": article.journal or "",
                 "chunk_index": i,
                 "total_chunks": len(chunks),
-                "source_file": str(html_file)
+                "source_file": relative_url
             }
             
             doc = Document(
@@ -416,19 +397,6 @@ class ArticleIndexer:
         
         return documents
     
-    def _is_already_indexed(self, html_file: Path) -> bool:
-        """Check if file is already indexed in vector store."""
-        try:
-            # Query vector store for documents with this source file
-            results = self.vectorstore.similarity_search(
-                query="",  # Empty query
-                k=1,
-                filter={"source_file": str(html_file)}
-            )
-            return len(results) > 0
-        except Exception:
-            # If query fails, assume not indexed
-            return False
     
     def get_vectorstore_stats(self) -> Dict[str, Any]:
         """Get statistics about the vector store."""
