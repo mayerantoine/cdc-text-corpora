@@ -102,6 +102,11 @@ class ArticleIndexer:
             chroma_dir = self.data_dir / "chroma_db"
             chroma_dir.mkdir(exist_ok=True)  # Ensure chroma_db directory exists
             self.config.persist_directory = str(chroma_dir)
+            
+            # Path verification logging
+            print(f"🗂️  ArticleIndexer using data directory: {self.data_dir}")
+            print(f"🔍 ArticleIndexer chroma database path: {self.config.persist_directory}")
+            print(f"📁 Chroma directory exists: {chroma_dir.exists()}")
         
         # Initialize components
         self.embeddings = None
@@ -117,7 +122,7 @@ class ArticleIndexer:
         # Initialize embeddings
         self.embeddings = HuggingFaceEmbeddings(
             model_name=self.config.embedding_model,
-            show_progress=self.config.progress_bar
+            show_progress=False  # Disable HuggingFace internal progress bars to avoid clutter
         )
         
         # Initialize text splitter
@@ -233,25 +238,28 @@ class ArticleIndexer:
         # Create parser for this collection
         parser = create_parser(collection, '', language, html_articles, validate_articles=self.config.validate_articles)
         
-        # Parse all articles first
+        # Parse articles first (parser shows its own progress bar)
         parsed_articles, parsing_stats = parser.parse_all_articles()
+        
+        # Now show our progress bar for indexing phase only
+        if self.config.progress_bar:
+            print(f"\n✓ Parsed {len(parsed_articles)} articles from {collection.upper()}")
+            print("Starting vector store indexing...")
+        
+        main_progress = None
         
         if not parsed_articles:
             error_msg = f"No articles parsed from {collection}"
             self.logger.warning(error_msg)
             stats.errors.append(error_msg)
+            if main_progress:
+                main_progress.close()
             return stats
         
-        # Convert parsed articles to documents and index them
+        # Convert parsed articles to documents
         all_documents = []
         
-        progress_desc = f"Converting {collection.upper()} articles to documents"
-        if self.config.progress_bar:
-            article_progress = tqdm(parsed_articles.items(), desc=progress_desc)
-        else:
-            article_progress = parsed_articles.items()
-        
-        for relative_url, article in article_progress:
+        for relative_url, article in parsed_articles.items():
             try:
                 # Convert article to LangChain documents
                 documents = self._article_to_documents(article, relative_url)
@@ -264,62 +272,68 @@ class ArticleIndexer:
                 stats.errors.append(error_msg)
                 stats.failed_files += 1
         
-        # Index all documents in batches
+        # Index all documents in batches with progress bar
         if all_documents:
-            stats = self._index_documents_batch(all_documents, stats)
+            batch_size = self.config.batch_size
+            total_batches = (len(all_documents) + batch_size - 1) // batch_size
+            
+            # Create progress bar for indexing phase
+            if self.config.progress_bar:
+                main_progress = tqdm(
+                    total=total_batches,
+                    desc=f"Indexing {len(all_documents)} document chunks",
+                    unit="batches"
+                )
+            
+            batches_processed = 0
+            
+            for i in range(0, len(all_documents), batch_size):
+                batch_docs = all_documents[i:i + batch_size]
+                
+                try:
+                    # Check for existing documents if skip_existing is enabled
+                    if self.config.skip_existing:
+                        batch_docs = self._filter_existing_documents(batch_docs)
+                        if not batch_docs:
+                            stats.skipped_files += len(all_documents[i:i + batch_size])
+                            batches_processed += 1
+                            if main_progress:
+                                main_progress.set_postfix(chunks=stats.total_chunks, skipped=stats.skipped_files)
+                                main_progress.update(1)
+                            continue
+                    
+                    # Add documents to vector store
+                    self.vectorstore.add_documents(batch_docs)
+                    stats.total_chunks += len(batch_docs)
+                    batches_processed += 1
+                    
+                    if main_progress:
+                        main_progress.set_postfix(chunks=stats.total_chunks, processed=stats.processed_files)
+                        main_progress.update(1)
+                    
+                except Exception as e:
+                    error_msg = f"Failed to index batch {i//batch_size + 1}: {e}"
+                    self.logger.error(error_msg)
+                    stats.errors.append(error_msg)
+                    stats.failed_files += len(batch_docs)
+                    batches_processed += 1
+                    
+                    if main_progress:
+                        main_progress.set_postfix(chunks=stats.total_chunks, errors=len(stats.errors))
+                        main_progress.update(1)
+            
+            if main_progress:
+                main_progress.close()
+        
+        # Final status message
+        if self.config.progress_bar:
+            print(f"✓ Indexed {stats.total_chunks} document chunks from {stats.processed_files} articles")
+        
+        self.logger.info(f"Successfully indexed {stats.total_chunks} document chunks")
         
         stats.processing_time = time.time() - start_time
         return stats
     
-    def _index_documents_batch(
-        self,
-        documents: List[Document],
-        stats: IndexStats
-    ) -> IndexStats:
-        """Index documents in batches to vector store."""
-        from tqdm.auto import tqdm
-        
-        batch_size = self.config.batch_size
-        total_batches = (len(documents) + batch_size - 1) // batch_size
-        
-        progress_desc = f"Indexing {len(documents)} document chunks"
-        if self.config.progress_bar:
-            batch_progress = tqdm(total=total_batches, desc=progress_desc, unit="batches")
-        
-        # Process documents in batches
-        for i in range(0, len(documents), batch_size):
-            batch_docs = documents[i:i + batch_size]
-            
-            try:
-                # Check for existing documents if skip_existing is enabled
-                if self.config.skip_existing:
-                    batch_docs = self._filter_existing_documents(batch_docs)
-                    if not batch_docs:
-                        stats.skipped_files += len(documents[i:i + batch_size])
-                        if self.config.progress_bar:
-                            batch_progress.update(1)
-                        continue
-                
-                # Add documents to vector store
-                self.vectorstore.add_documents(batch_docs)
-                stats.total_chunks += len(batch_docs)
-                
-                self.logger.debug(f"Indexed batch {i//batch_size + 1}/{total_batches}: {len(batch_docs)} chunks")
-                
-            except Exception as e:
-                error_msg = f"Failed to index batch {i//batch_size + 1}: {e}"
-                self.logger.error(error_msg)
-                stats.errors.append(error_msg)
-                stats.failed_files += len(batch_docs)
-            
-            if self.config.progress_bar:
-                batch_progress.update(1)
-        
-        if self.config.progress_bar:
-            batch_progress.close()
-        
-        self.logger.info(f"Successfully indexed {stats.total_chunks} document chunks")
-        return stats
     
     def _filter_existing_documents(self, documents: List[Document]) -> List[Document]:
         """Filter out documents that already exist in vector store."""

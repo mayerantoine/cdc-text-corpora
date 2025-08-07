@@ -17,6 +17,7 @@ from sentence_transformers import SentenceTransformer
 import chromadb
 from cdc_text_corpora.core.datasets import CDCCorpus
 from cdc_text_corpora.core.parser import Article, CDCCollections
+from cdc_text_corpora.utils.config import ensure_data_directory
 
 # Load environment variables from .env file
 load_dotenv()
@@ -66,9 +67,23 @@ class RAGEngine:
         if self.llm_provider not in ["openai", "anthropic"]:
             raise ValueError(f"Invalid LLM provider '{self.llm_provider}'. Must be 'openai' or 'anthropic'")
         
-        # Set up persistence directory
+        # Set up persistence directory using standardized utils approach
         if persist_directory is None:
-            persist_directory = os.getenv("CHROMA_PERSIST_DIRECTORY") or str(corpus_manager.get_data_directory() / "chroma_db")
+            # Use the corpus manager's data directory to ensure consistency
+            # This ensures ArticleIndexer and RAGEngine use the same base directory
+            corpus_data_dir = corpus_manager.get_data_directory()
+            # Ensure the directory exists using utils approach
+            ensure_data_directory(str(corpus_data_dir))
+            
+            chroma_dir = corpus_data_dir / "chroma_db"
+            chroma_dir.mkdir(exist_ok=True)  # Ensure chroma_db directory exists
+            persist_directory = str(chroma_dir)
+            
+            # Path verification logging
+            #print(f"🗂️  RAGEngine using data directory: {corpus_data_dir}")
+            #print(f"🔍 RAGEngine chroma database path: {persist_directory}")
+            #print(f"📁 Chroma directory exists: {chroma_dir.exists()}")
+            
         self.persist_directory = persist_directory
         
         # Initialize components
@@ -95,14 +110,27 @@ class RAGEngine:
         # Initialize embeddings
         self.embeddings = HuggingFaceEmbeddings(
             model_name=self.embedding_model_name,
-            show_progress=True
+            show_progress=False
         )
         
-        # Initialize ChromaDB vector store
+        # Initialize ChromaDB vector store with path verification
+        chroma_path = Path(self.persist_directory)
+        #print(f"🔄 Initializing ChromaDB at: {chroma_path}")
+        #print(f"📂 Directory exists before init: {chroma_path.exists()}")
+        
         self.vectorstore = Chroma(
             embedding_function=self.embeddings,
             persist_directory=self.persist_directory
         )
+        
+        #print(f"📂 Directory exists after init: {chroma_path.exists()}")
+        
+        # Check if vector store has any documents
+        try:
+            doc_count = self.vectorstore._collection.count()
+            #print(f"📊 Vector store contains {doc_count} documents")
+        except Exception as e:
+            print(f"⚠️  Could not get document count: {e}")
         
         # Initialize retriever
         self.retriever = self.vectorstore.as_retriever(
