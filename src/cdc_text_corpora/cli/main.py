@@ -17,7 +17,23 @@ from cdc_text_corpora.qa.rag_pipeline import RAGPipeline
 from cdc_text_corpora.qa.rag_agent import AgenticRAG, AgentConfig
 from cdc_text_corpora.index import ArticleIndexer, IndexConfig
 
+###TODO
 
+## FIX RAG
+# Fix progress for indexer articles using tqdm
+# why agent dont see index - to fix
+# Make rag sequential can see index and do not depends on json/parquet
+# stop agen ealry if there's no data
+# Improve speed of indexing
+# BOTH RAG should work end-to-end
+
+## FIX FILES SAVES and ADD pandas API
+# add parse - parquet # Saved files as Parquet  DURING INDEXING
+# Parquet vs hybrid databse - vector db emded chunck VS full text db title+abstract
+# Lazy loading API for parquet files
+
+
+## Add citations to RAG Agent and RAP Pipeline
 app = typer.Typer(
     name="cdc-corpus",
     help="CDC Text Corpora: Access to PCD, EID, and MMWR collections with semantic search and QA",
@@ -25,55 +41,6 @@ app = typer.Typer(
 
 console = Console()
 
-
-def _run_agentic_interactive_loop(agentic_rag, console: Console) -> None:
-    """Run interactive loop for agentic RAG mode."""
-    console.print(Panel(
-        "[bold green]🎯 Interactive Agentic Q&A Session[/bold green]\n"
-        "[dim]Ask research questions. The agents will search, gather evidence, and provide comprehensive answers.\n"
-        "Type 'quit', 'exit', or 'q' to stop.[/dim]",
-        title="Agentic Q&A Mode", 
-        border_style="green"
-    ))
-    
-    question_count = 0
-    
-    while True:
-        try:
-            # Get question from user
-            question = Prompt.ask(f"\n[bold cyan]Research Question #{question_count + 1}[/bold cyan]")
-            
-            # Check for exit commands
-            if question.lower().strip() in ['quit', 'exit', 'q', '']:
-                break
-            
-            # Show processing indicator
-            console.print("[yellow]🔄 Processing with multi-agent system...[/yellow]")
-            
-            # Run async agentic RAG
-            try:
-                answer = asyncio.run(agentic_rag.ask_question(question, max_turns=10))
-                
-                # Display answer
-                console.print(Panel(
-                    answer,
-                    title="🤖 Agentic Answer",
-                    border_style="blue"
-                ))
-                
-                question_count += 1
-                
-            except Exception as e:
-                console.print(f"[red]❌ Error processing question: {e}[/red]")
-                continue
-                
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            console.print(f"[red]❌ Error in interactive loop: {e}[/red]")
-            continue
-    
-    console.print(f"\n[green]👋 Agentic Q&A session ended. Answered {question_count} questions.[/green]")
 
 
 @app.command()
@@ -375,13 +342,6 @@ def qa(
             pipeline.run()
             
         elif mode.lower() == "agentic":
-            # Use AgenticRAG with interactive wrapper
-            console.print(Panel(
-                "[bold green]🤖 Agentic RAG Mode[/bold green]\n"
-                "[dim]Multi-agent system for advanced research question answering[/dim]",
-                title="Agentic Mode",
-                border_style="green"
-            ))
             
             # Initialize corpus and check data availability
             corpus = CDCCorpus(data_dir=data_dir)
@@ -399,7 +359,7 @@ def qa(
             agentic_rag = AgenticRAG(corpus=corpus, config=config)
             
             # Start interactive loop
-            _run_agentic_interactive_loop(agentic_rag, console)
+            agentic_rag.run(console)
         
     except KeyboardInterrupt:
         console.print("\n[yellow]👋 Q&A session interrupted by user[/yellow]")
