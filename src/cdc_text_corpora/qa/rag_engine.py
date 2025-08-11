@@ -57,9 +57,9 @@ class RAGEngine:
         
         # Load configuration from environment variables with fallbacks
         self.embedding_model_name = embedding_model or os.getenv("DEFAULT_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-        self.llm_model_name = llm_model or os.getenv("DEFAULT_LLM_MODEL", "gpt-3.5-turbo")
-        provider = llm_provider or os.getenv("DEFAULT_LLM_PROVIDER", "openai")
-        self.llm_provider = provider.lower() if provider else "openai"
+        self.llm_model_name = llm_model or os.getenv("DEFAULT_LLM_MODEL", "claude-3-5-sonnet")
+        provider = llm_provider or os.getenv("DEFAULT_LLM_PROVIDER", "anthropic")
+        self.llm_provider = provider.lower() if provider else "anthropic"
         self.chunk_size = chunk_size or int(os.getenv("DEFAULT_CHUNK_SIZE", "1000"))
         self.chunk_overlap = chunk_overlap or int(os.getenv("DEFAULT_CHUNK_OVERLAP", "200"))
         
@@ -380,18 +380,43 @@ Answer:"""
         total_chunks = len(chunked_documents)
         print(f"✅ Created {total_chunks} chunks from {len(documents)} documents")
         
-        # Create new vector store from documents
+        # Create new vector store from documents using batch approach
         print("🔍 Creating vector database with embeddings...")
         print(f"   Processing {total_chunks} chunks with {self.embedding_model_name}...")
         
-        self.vectorstore = self._show_progress_for_operation(
-            "Creating vector database with embeddings",
-            "🔍",
-            Chroma.from_documents,
-            documents=chunked_documents,
-            embedding=self.embeddings,
-            persist_directory=self.persist_directory
-        )
+        # Use batched approach for better progress tracking
+        batch_size = 50  # Process 50 chunks at a time
+        
+        try:
+            from tqdm import tqdm
+            progress_bar = tqdm(total=total_chunks, desc="Creating embeddings", unit="chunk")
+        except ImportError:
+            progress_bar = None
+            print("   Processing in batches (this may take several minutes)...")
+        
+        try:
+            for i in range(0, len(chunked_documents), batch_size):
+                batch = chunked_documents[i:i + batch_size]
+                
+                if i == 0:
+                    # Create initial vectorstore with first batch
+                    self.vectorstore = Chroma.from_documents(
+                        documents=batch,
+                        embedding=self.embeddings,
+                        persist_directory=self.persist_directory
+                    )
+                else:
+                    # Add remaining batches to existing vectorstore
+                    self.vectorstore.add_documents(batch)
+                
+                # Update progress bar
+                if progress_bar:
+                    progress_bar.update(len(batch))
+                else:
+                    print(f"   Processed {min(i + batch_size, total_chunks)}/{total_chunks} chunks")
+        finally:
+            if progress_bar:
+                progress_bar.close()
         
         # Update retriever
         self.retriever = self.vectorstore.as_retriever(

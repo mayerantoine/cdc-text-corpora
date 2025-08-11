@@ -29,34 +29,20 @@ cd cdc-text-corpora
 # Install with uv (recommended)
 uv sync
 
+# Activate the virtual environment
+source .venv/bin/activate  # On Linux/macOS
+# or on Windows:
+# .venv\Scripts\activate
+
 # Or install in development mode
 uv pip install -e .
 ```
 
 ## Quick Start
 
-### Option 1: Interactive Setup (Recommended)
+### First Step: Setup API Keys (Required for RAG Features)
 
-Run the guided setup process that handles everything automatically:
-
-```bash
-# Launch interactive setup
-cdc-corpus run
-# or simply
-cdc-corpus
-```
-
-This will guide you through:
-1. **Collection Selection**: Choose PCD, EID, MMWR, or all collections
-2. **Language Selection**: Pick from available languages
-3. **Data Download**: Automatically downloads selected collections
-4. **Parsing**: Extracts and structures articles from HTML
-5. **Indexing**: Creates vector database for semantic search
-6. **Q&A Launch**: Starts interactive question-answering session
-
-### Option 2: Manual Setup
-
-#### 1. Setup API Keys
+⚠️ **Important**: Before using RAG features (semantic search and Q&A), you must configure API keys for LLM providers:
 
 Create a `.env` file in the project root:
 
@@ -64,7 +50,7 @@ Create a `.env` file in the project root:
 # Copy the example file
 cp .env.example .env
 
-# Add your API keys
+# Add your API keys (at least one is required for RAG features)
 OPENAI_API_KEY=your_openai_key_here
 ANTHROPIC_API_KEY=your_anthropic_key_here
 
@@ -73,16 +59,49 @@ DEFAULT_LLM_PROVIDER=anthropic
 DEFAULT_LLM_MODEL=claude-3-5-sonnet
 ```
 
-#### 2. Test API Connection
+**Note**: You can download and parse collections without API keys, but the `qa` command requires at least one LLM provider configured.
+
+### Option 1: Interactive Setup (Recommended)
+
+Run the guided setup process that handles everything automatically:
 
 ```bash
+# Make sure virtual environment is activated
+source .venv/bin/activate  # On Linux/macOS (.venv\Scripts\activate on Windows)
+
+# Launch interactive setup
+cdc-corpus run
+# or simply
+cdc-corpus
+```
+
+This will guide you through:
+1. **API Key Setup**: Configure LLM providers for RAG features
+2. **Collection Selection**: Choose PCD, EID, MMWR, or all collections
+3. **Language Selection**: Pick from available languages
+4. **Data Download**: Automatically downloads selected collections
+5. **Parsing**: Extracts and structures articles from HTML
+6. **Indexing**: Creates vector database for semantic search
+7. **Q&A Launch**: Starts interactive question-answering session
+
+### Option 2: Manual Setup
+
+#### 1. Test API Connection
+
+```bash
+# Make sure virtual environment is activated
+source .venv/bin/activate  # On Linux/macOS (.venv\Scripts\activate on Windows)
+
 # Test your API configuration
 uv run tests/test_api_connection.py
 ```
 
-#### 3. Download Data
+#### 2. Download Data
 
 ```bash
+# Make sure virtual environment is activated (if not already)
+source .venv/bin/activate
+
 # Download all collections
 cdc-corpus download --collection all
 
@@ -92,7 +111,7 @@ cdc-corpus download --collection eid
 cdc-corpus download --collection mmwr
 ```
 
-#### 4. Parse Articles
+#### 3. Parse Articles
 
 ```bash
 # Parse all collections (English)
@@ -103,7 +122,7 @@ cdc-corpus parse --collection pcd --language en
 cdc-corpus parse --collection eid --language es
 ```
 
-#### 5. Start Q&A Session
+#### 4. Start Q&A Session (Requires API Keys)
 
 ```bash
 # Interactive Q&A with all collections

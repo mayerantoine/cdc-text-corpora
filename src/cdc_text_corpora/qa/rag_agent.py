@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from typing import TypedDict
 import asyncio
+import os
 
 from cdc_text_corpora.core.datasets import CDCCorpus
 from cdc_text_corpora.qa.rag_engine import RAGEngine
@@ -55,14 +56,27 @@ class AgentConfig:
         search_k: int = 10,
         max_evidence_pieces: int = 5,
         max_search_attempts: int = 3,
-        model_name: str = "gpt-4o-mini"
+        model_name: Optional[str] = None
     ):
         self.collection_filter = collection_filter
         self.relevance_cutoff = relevance_cutoff
         self.search_k = search_k
         self.max_evidence_pieces = max_evidence_pieces
         self.max_search_attempts = max_search_attempts
-        self.model_name = model_name
+        
+        # Use same environment variables as RAGEngine for consistency
+        if model_name is None:
+            # Get provider and model from environment (same as RAGEngine)
+            provider = os.getenv("DEFAULT_LLM_PROVIDER", "anthropic").lower()
+            if provider == "anthropic":
+                self.model_name = os.getenv("DEFAULT_LLM_MODEL", "claude-3-5-sonnet")
+            elif provider == "openai":
+                self.model_name = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+            else:
+                # Fallback to environment variable or default
+                self.model_name = os.getenv("DEFAULT_LLM_MODEL", "claude-3-5-sonnet")
+        else:
+            self.model_name = model_name
 
 
 class AgentToolFactory:
