@@ -1,10 +1,26 @@
 [project]
 name = "cdc-text-corpora"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python package for accessing CDC Text Corpora with semantic search and RAG-based question answering"
 readme = "README.md"
 authors = [
     { name = "Mayer Antoine", email = "mayerantoine@gmail.com" }
+]
+keywords = ["cdc", "health", "research", "corpus", "nlp", "rag", "semantic-search", "langchain", "ai", "machine-learning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Researchers",
+    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
 ]
 requires-python = ">=3.10"
 dependencies = [
@@ -27,6 +43,14 @@ dependencies = [
     "tqdm>=4.67.1",
     "typer>=0.16.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/mayerantoine/cdc-text-corpora"
+Repository = "https://github.com/mayerantoine/cdc-text-corpora"
+Documentation = "https://github.com/mayerantoine/cdc-text-corpora/blob/main/README.md"
+"Bug Reports" = "https://github.com/mayerantoine/cdc-text-corpora/issues"
+"Source Code" = "https://github.com/mayerantoine/cdc-text-corpora"
+"Data Source" = "https://data.cdc.gov/National-Center-for-State-Tribal-Local-and-Territo/CDC-Text-Corpora-for-Learners-HTML-Mirrors-of-MMWR/ut5n-bmc3"
 
 [project.scripts]
 cdc-corpus= "cdc_text_corpora:main"
