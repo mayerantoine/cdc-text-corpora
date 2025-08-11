@@ -67,14 +67,14 @@ class AgentConfig:
         # Use same environment variables as RAGEngine for consistency
         if model_name is None:
             # Get provider and model from environment (same as RAGEngine)
-            provider = os.getenv("DEFAULT_LLM_PROVIDER", "anthropic").lower()
-            if provider == "anthropic":
-                self.model_name = os.getenv("DEFAULT_LLM_MODEL", "claude-3-5-sonnet")
-            elif provider == "openai":
+            provider = os.getenv("DEFAULT_LLM_PROVIDER", "openai").lower()
+            if provider == "openai":
                 self.model_name = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+            elif provider == "anthropic":
+                self.model_name = os.getenv("DEFAULT_LLM_MODEL", "claude-3-5-sonnet")
             else:
                 # Fallback to environment variable or default
-                self.model_name = os.getenv("DEFAULT_LLM_MODEL", "claude-3-5-sonnet")
+                self.model_name = os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
         else:
             self.model_name = model_name
 

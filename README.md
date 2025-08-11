@@ -55,8 +55,8 @@ OPENAI_API_KEY=your_openai_key_here
 ANTHROPIC_API_KEY=your_anthropic_key_here
 
 # Configure default settings
-DEFAULT_LLM_PROVIDER=anthropic
-DEFAULT_LLM_MODEL=claude-3-5-sonnet
+DEFAULT_LLM_PROVIDER=openai
+DEFAULT_LLM_MODEL=gpt-4o-mini
 ```
 
 **Note**: You can download and parse collections without API keys, but the `qa` command requires at least one LLM provider configured.
@@ -414,7 +414,7 @@ pipeline.run()  # Starts interactive Q&A session
 | `OPENAI_API_KEY` | OpenAI API key | - |
 | `ANTHROPIC_API_KEY` | Anthropic API key | - |
 | `DEFAULT_LLM_PROVIDER` | Default LLM provider | `openai` |
-| `DEFAULT_LLM_MODEL` | Default model name | `gpt-3.5-turbo` |
+| `DEFAULT_LLM_MODEL` | Default model name | `gpt-4o-mini` |
 | `DEFAULT_EMBEDDING_MODEL` | Embedding model | `all-MiniLM-L6-v2` |
 | `DEFAULT_CHUNK_SIZE` | Text chunk size | `1000` |
 | `DEFAULT_CHUNK_OVERLAP` | Chunk overlap | `200` |

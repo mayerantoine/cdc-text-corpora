@@ -57,9 +57,9 @@ class RAGEngine:
         
         # Load configuration from environment variables with fallbacks
         self.embedding_model_name = embedding_model or os.getenv("DEFAULT_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-        self.llm_model_name = llm_model or os.getenv("DEFAULT_LLM_MODEL", "claude-3-5-sonnet")
-        provider = llm_provider or os.getenv("DEFAULT_LLM_PROVIDER", "anthropic")
-        self.llm_provider = provider.lower() if provider else "anthropic"
+        self.llm_model_name = llm_model or os.getenv("DEFAULT_LLM_MODEL", "gpt-4o-mini")
+        provider = llm_provider or os.getenv("DEFAULT_LLM_PROVIDER", "openai")
+        self.llm_provider = provider.lower() if provider else "openai"
         self.chunk_size = chunk_size or int(os.getenv("DEFAULT_CHUNK_SIZE", "1000"))
         self.chunk_overlap = chunk_overlap or int(os.getenv("DEFAULT_CHUNK_OVERLAP", "200"))
         
