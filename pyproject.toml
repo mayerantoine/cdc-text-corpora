@@ -9,9 +9,8 @@ authors = [
 keywords = ["cdc", "health", "research", "corpus", "nlp", "rag", "semantic-search", "langchain", "ai", "machine-learning"]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Intended Audience :: Researchers",
-    "Intended Audience :: Healthcare Industry",
     "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Topic :: Text Processing :: Linguistic",
     "Topic :: Software Development :: Libraries :: Python Modules",
