@@ -289,7 +289,6 @@ class RAGPipeline:
                         self.console.print(f"  {i}. {collection_badge} {source['title']}")
                         if source.get('url'):
                             self.console.print(f"     [dim]{source['url']}[/dim]")
-                        self.console.print(f"     [dim]...{source['excerpt']}...[/dim]")
                 
                 question_count += 1
                 

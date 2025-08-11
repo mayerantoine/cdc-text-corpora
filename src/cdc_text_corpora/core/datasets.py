@@ -35,14 +35,14 @@ class ArticleCollection:
         self._json_files = self._find_json_files()
     
     def _find_json_files(self) -> List[pathlib.Path]:
-        """Find JSON files matching the collection and language criteria."""
+        """Find the most recent JSON file for each collection and language combination."""
         json_parsed_dir = self.corpus_manager.data_dir / "json-parsed"
         
         if not json_parsed_dir.exists():
             print("No json-parsed directory found. Parse some collections first.")
             return []
         
-        json_files: List[pathlib.Path] = []
+        selected_files: List[pathlib.Path] = []
         
         # If specific collection requested
         if self.collection:
@@ -55,17 +55,28 @@ class ArticleCollection:
             else:
                 pattern = f"{self.collection.lower()}_*_*.json"
             
-            json_files.extend(json_parsed_dir.glob(pattern))
+            # Find all matching files and select the most recent
+            matching_files = list(json_parsed_dir.glob(pattern))
+            if matching_files:
+                most_recent = max(matching_files, key=lambda f: f.stat().st_mtime)
+                selected_files.append(most_recent)
+                print(f"Selected most recent file for {self.collection.upper()}: {most_recent.name}")
         else:
-            # Process all collections
+            # Process all collections - find most recent for each
             for coll in ['pcd', 'eid', 'mmwr']:
                 if self.language:
                     pattern = f"{coll}_{self.language}_*.json"
                 else:
                     pattern = f"{coll}_*_*.json"
-                json_files.extend(json_parsed_dir.glob(pattern))
+                
+                # Find all matching files for this collection and select the most recent
+                matching_files = list(json_parsed_dir.glob(pattern))
+                if matching_files:
+                    most_recent = max(matching_files, key=lambda f: f.stat().st_mtime)
+                    selected_files.append(most_recent)
+                    print(f"Selected most recent file for {coll.upper()}: {most_recent.name}")
         
-        return json_files
+        return selected_files
     
     def __iter__(self) -> Iterator['Article']:
         """Return iterator for the collection."""

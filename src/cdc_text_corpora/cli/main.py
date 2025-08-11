@@ -15,28 +15,26 @@ from cdc_text_corpora.utils.config import get_data_directory
 from cdc_text_corpora.qa.rag_engine import RAGEngine
 from cdc_text_corpora.qa.rag_pipeline import RAGPipeline
 from cdc_text_corpora.qa.rag_agent import AgenticRAG, AgentConfig
-from cdc_text_corpora.index import ArticleIndexer, IndexConfig
 
 ###TODO
 
 ## FIX RAG
-# Fix progress for indexer articles using tqdm
-# why agent dont see index - to fix
-# Make rag sequential can see index and do not depends on json/parquet
-# stop agen ealry if there's no data
-# Improve speed of indexing
+# Fix progress for vector database operations using tqdm
+# Make rag sequential and improve data loading
+# Stop agent early if there's no data
+# Improve speed of vector operations
 # BOTH RAG should work end-to-end
 
 ## FIX FILES SAVES and ADD pandas API
-# add parse - parquet # Saved files as Parquet  DURING INDEXING
-# Parquet vs hybrid databse - vector db emded chunck VS full text db title+abstract
+# add parse - parquet # Save files as Parquet during parsing
+# Parquet vs hybrid database - vector db embed chunks VS full text db title+abstract
 # Lazy loading API for parquet files
 
 
 ## Add citations to RAG Agent and RAP Pipeline
 app = typer.Typer(
     name="cdc-corpus",
-    help="CDC Text Corpora: Access to PCD, EID, and MMWR collections with semantic search and QA",
+    help="CDC Text Corpora: Interactive access to PCD, EID, and MMWR collections. Run without arguments for guided setup.",
 )
 
 console = Console()
@@ -370,158 +368,6 @@ def qa(
             console.print_exception()
         raise typer.Exit(1)
 
-@app.command()
-def index(
-    collection: str = typer.Option(
-        "all",
-        "--collection",
-        "-c", 
-        help="Collection to index: pcd, eid, mmwr, or all"
-    ),
-    language: str = typer.Option(
-        "all",
-        "--language",
-        "-l",
-        help="Language filter: en, es, fr, zhs, zht, or all"
-    ),
-    batch_size: int = typer.Option(
-        50,
-        "--batch-size",
-        "-b",
-        help="Number of files to index in each batch"
-    ),
-    chunk_size: int = typer.Option(
-        1000,
-        "--chunk-size",
-        help="Size of text chunks for embedding"
-    ),
-    skip_existing: bool = typer.Option(
-        True,
-        "--skip-existing/--no-skip-existing",
-        help="Skip files already indexed in vector store"
-    ),
-    clear_existing: bool = typer.Option(
-        False,
-        "--clear-existing",
-        help="Clear existing vector store before indexing"
-    ),
-    data_dir: str = typer.Option(
-        None,
-        "--data-dir",
-        "-d",
-        help="Custom data directory path"
-    ),
-    verbose: bool = typer.Option(
-        False,
-        "--verbose",
-        "-v",
-        help="Show verbose output"
-    )
-) -> None:
-    """Index HTML articles directly to vector store without intermediate JSON files."""
-    
-    # Validate collection input
-    valid_collections = ["pcd", "eid", "mmwr", "all"]
-    if collection.lower() not in valid_collections:
-        console.print(f"[red]Error: Invalid collection '{collection}'[/red]")
-        console.print(f"[yellow]Valid options: {', '.join(valid_collections)}[/yellow]")
-        raise typer.Exit(1)
-    
-    # Validate language input
-    valid_languages = ["en", "es", "fr", "zhs", "zht", "all"]
-    if language.lower() not in valid_languages:
-        console.print(f"[red]Error: Invalid language '{language}'[/red]")
-        console.print(f"[yellow]Valid options: {', '.join(valid_languages)}[/yellow]")
-        raise typer.Exit(1)
-    
-    try:
-        # Display indexing info
-        console.print(Panel(
-            f"[bold blue]HTML to Vector Store Indexing[/bold blue]\n"
-            f"Collection: {collection}\n"
-            f"Language: {language}\n"
-            f"Batch size: {batch_size}\n"
-            f"Chunk size: {chunk_size}\n" 
-            f"Skip existing: {'Yes' if skip_existing else 'No'}\n"
-            f"Clear existing: {'Yes' if clear_existing else 'No'}",
-            title="Article Indexing Configuration",
-            border_style="blue"
-        ))
-        
-        # Create indexing configuration
-        config = IndexConfig(
-            batch_size=batch_size,
-            chunk_size=chunk_size,
-            skip_existing=skip_existing,
-            progress_bar=True,
-            validate_articles=True
-        )
-        
-        # Initialize article indexer
-        indexer = ArticleIndexer(config=config, data_dir=data_dir)
-        
-        # Clear existing vector store if requested
-        if clear_existing:
-            console.print("[yellow]🗑️  Clearing existing vector store...[/yellow]")
-            if indexer.clear_vectorstore():
-                console.print("[green]✅ Vector store cleared successfully[/green]")
-            else:
-                console.print("[red]❌ Failed to clear vector store[/red]")
-                raise typer.Exit(1)
-        
-        # Determine collections to process
-        collections_to_process = ['pcd', 'eid', 'mmwr'] if collection.lower() == 'all' else [collection.lower()]
-        
-        total_processed = 0
-        total_chunks = 0
-        
-        for coll in collections_to_process:
-            console.print(f"\n[bold cyan]🔄 Indexing {coll.upper()} collection...[/bold cyan]")
-            
-            # Index collection
-            language_param = None if language.lower() == 'all' else language.lower()
-            stats = indexer.index_collection(coll, language_param)
-            
-            # Display results
-            if stats.errors:
-                console.print(f"[yellow]⚠️  {len(stats.errors)} errors occurred during indexing[/yellow]")
-                if verbose:
-                    for error in stats.errors[:5]:  # Show first 5 errors
-                        console.print(f"[dim red]  • {error}[/dim red]")
-                    if len(stats.errors) > 5:
-                        console.print(f"[dim]  ... and {len(stats.errors) - 5} more errors[/dim]")
-            
-            console.print(f"[green]✅ {coll.upper()} indexing complete![/green]")
-            console.print(f"[green]  • Processed: {stats.processed_files} files[/green]")
-            console.print(f"[green]  • Indexed: {stats.total_chunks} chunks[/green]")
-            console.print(f"[green]  • Indexing time: {stats.processing_time:.1f}s[/green]")
-            
-            if stats.skipped_files > 0:
-                console.print(f"[yellow]  • Skipped: {stats.skipped_files} files (already indexed)[/yellow]")
-            if stats.failed_files > 0:
-                console.print(f"[red]  • Failed: {stats.failed_files} files[/red]")
-            
-            total_processed += stats.processed_files
-            total_chunks += stats.total_chunks
-        
-        # Final summary
-        console.print(f"\n[bold green]🎉 Article indexing complete![/bold green]")
-        console.print(f"[green]Total files processed: {total_processed}[/green]")
-        console.print(f"[green]Total chunks indexed: {total_chunks}[/green]")
-        
-        # Show vector store stats
-        vectorstore_stats = indexer.get_vectorstore_stats()
-        if "error" not in vectorstore_stats:
-            console.print(f"[green]Vector store contains: {vectorstore_stats['total_documents']} documents[/green]")
-        
-        if verbose:
-            console.print(f"[dim]Vector store location: {indexer.config.persist_directory}[/dim]")
-            
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        if verbose:
-            console.print_exception()
-        raise typer.Exit(1)
 
 
 @app.command()
@@ -529,9 +375,282 @@ def search() -> None:
     """Search CDC text corpora collections."""
     print(f"RAG code")
 
-def main() -> None:
-    """Main CLI entry point."""
-    app()
+
+def display_welcome_intro():
+    """Display welcome message and tool introduction."""
+    console.print(Panel(
+        "[bold cyan]CDC Text Corpora[/bold cyan]\n\n"
+        "[blue]🏥 Access to CDC Collections:[/blue]\n"
+        "  • [green]PCD[/green] - Preventing Chronic Disease (2004-2023)\n"
+        "  • [green]EID[/green] - Emerging Infectious Diseases (1995-2023)\n"
+        "  • [green]MMWR[/green] - Morbidity and Mortality Weekly Report (1982-2023)\n\n"
+        "[blue]🤖 Powered by AI:[/blue]\n"
+        "  • Semantic search across 40+ years of research\n"
+        "  • Multi-agent RAG system for comprehensive answers\n"
+        "  • Citation-based responses with source links",
+        title="🔬 Welcome to CDC Text Corpora",
+        border_style="cyan"
+    ))
+
+
+def interactive_collection_selection():
+    """Interactive menu for collection selection."""
+    console.print("\n[bold blue]Step 1: Select Collections to Download[/bold blue]")
+    
+    collections_info = {
+        "1": {"code": "pcd", "name": "Preventing Chronic Disease", "desc": "Chronic disease research (2004-2023)"},
+        "2": {"code": "eid", "name": "Emerging Infectious Diseases", "desc": "Infectious disease research (1995-2023)"}, 
+        "3": {"code": "mmwr", "name": "Morbidity and Mortality Weekly Report", "desc": "Weekly surveillance reports (1982-2023)"},
+        "4": {"code": "all", "name": "All Collections", "desc": "Download all three collections"}
+    }
+    
+    # Display collection options
+    table = Table(title="Available Collections", box=box.ROUNDED)
+    table.add_column("Option", style="cyan", no_wrap=True)
+    table.add_column("Collection", style="green")
+    table.add_column("Description", style="dim")
+    
+    for key, info in collections_info.items():
+        table.add_row(key, info["name"], info["desc"])
+    
+    console.print(table)
+    
+    while True:
+        choice = Prompt.ask(
+            "\n[bold]Select collection(s) to download",
+            choices=["1", "2", "3", "4"],
+            default="4"
+        )
+        
+        selected = collections_info[choice]
+        
+        # Confirm selection
+        if Confirm.ask(f"\n[yellow]Download {selected['name']}?[/yellow]", default=True):
+            return selected["code"]
+        else:
+            console.print("[dim]Please make another selection...[/dim]")
+
+
+def interactive_language_selection(available_languages):
+    """Interactive menu for language selection."""
+    console.print("\n[bold blue]Step 3: Select Language for Parsing & Indexing[/bold blue]")
+    
+    language_info = {
+        "1": {"code": "en", "name": "English", "desc": "Primary language for all collections"},
+        "2": {"code": "es", "name": "Spanish", "desc": "Available for MMWR and some PCD articles"},
+        "3": {"code": "fr", "name": "French", "desc": "Available for some MMWR articles"},
+        "4": {"code": "all", "name": "All Languages", "desc": "Process all available languages"}
+    }
+    
+    # Filter available options based on what's actually available
+    if "es" not in available_languages:
+        del language_info["2"]
+    if "fr" not in available_languages:
+        del language_info["3"]
+    
+    # Display language options
+    table = Table(title="Available Languages", box=box.ROUNDED)
+    table.add_column("Option", style="cyan", no_wrap=True) 
+    table.add_column("Language", style="green")
+    table.add_column("Description", style="dim")
+    
+    for key, info in language_info.items():
+        table.add_row(key, info["name"], info["desc"])
+    
+    console.print(table)
+    
+    while True:
+        choice = Prompt.ask(
+            "\n[bold]Select language to process",
+            choices=list(language_info.keys()),
+            default="1"
+        )
+        
+        selected = language_info[choice]
+        
+        # Confirm selection
+        if Confirm.ask(f"\n[yellow]Process {selected['name']}?[/yellow]", default=True):
+            return selected["code"]
+        else:
+            console.print("[dim]Please make another selection...[/dim]")
+
+
+@app.command()
+def run() -> None:
+    """Interactive setup and launch of CDC Text Corpora system.
+    
+    This command provides a user-friendly interface that guides you through:
+    1. Collection download
+    2. Language selection  
+    3. Data parsing and indexing
+    4. Launch of agentic Q&A system
+    """
+    try:
+        # Step 1: Welcome and introduction
+        display_welcome_intro()
+        
+        if not Confirm.ask("\n[bold green]Ready to get started?[/bold green]", default=True):
+            console.print("[yellow]👋 Come back anytime![/yellow]")
+            raise typer.Exit(0)
+        
+        # Step 2: Collection selection and download
+        selected_collection = interactive_collection_selection()
+        
+        console.print(f"\n[bold blue]Step 2: Downloading {selected_collection.upper()} collection...[/bold blue]")
+        console.print("[dim]This may take a few minutes depending on your internet connection...[/dim]")
+        
+        try:
+            download_collection(selected_collection)
+            console.print(f"[green]✅ Successfully downloaded {selected_collection.upper()} collection![/green]")
+        except Exception as e:
+            console.print(f"[red]❌ Download failed: {e}[/red]")
+            if not Confirm.ask("[yellow]Continue anyway? (You may have existing data)[/yellow]", default=False):
+                raise typer.Exit(1)
+        
+        # Step 3: Language selection
+        # For simplicity, we'll offer the most common languages
+        available_languages = ["en", "es", "fr"] 
+        selected_language = interactive_language_selection(available_languages)
+        
+        # Step 4: Parsing
+        console.print(f"\n[bold blue]Step 4: Parsing {selected_collection.upper()} articles ({selected_language})...[/bold blue]")
+        console.print("[dim]Converting HTML articles to structured data...[/dim]")
+        
+        try:
+            corpus = CDCCorpus()
+            
+            # Check for existing parsed files before starting
+            collection_filter = None if selected_collection == "all" else selected_collection
+            config = AgentConfig(collection_filter=collection_filter or 'all')
+            agentic_rag = AgenticRAG(corpus=corpus, config=config)
+            status = agentic_rag.check_data_availability()
+            
+            # If parsed files already exist, ask user if they want to re-parse
+            skip_parsing = False
+            if status["parsed_articles_available"]:
+                console.print(f"\n[yellow]📄 Found existing parsed files with {status['total_articles']} articles[/yellow]")
+                collections_found = ", ".join([c.upper() for c in status["collections_found"]])
+                console.print(f"[dim]Collections: {collections_found}[/dim]")
+                
+                if not Confirm.ask("Re-parse and overwrite existing files?", default=False):
+                    console.print("[green]✅ Using existing parsed files[/green]")
+                    skip_parsing = True
+                    total_parsed = status["total_articles"]
+            
+            # Only proceed with parsing if user wants to overwrite or no files exist
+            if not skip_parsing:
+                language_param = None if selected_language == "all" else selected_language
+                collections_to_process = ['pcd', 'eid', 'mmwr'] if selected_collection == 'all' else [selected_collection]
+                total_parsed = 0
+                
+                for coll in collections_to_process:
+                    if corpus.is_collection_downloaded(coll):
+                        result = corpus.load_parse_save_html_articles(
+                            collection=coll,
+                            language=language_param,
+                            save_json=True,
+                            validate_articles=True
+                        )
+                        
+                        if 'error' not in result['stats']:
+                            parsed_count = result['stats']['parsed_count']
+                            total_parsed += parsed_count
+                            console.print(f"[green]✅ Parsed {parsed_count} {coll.upper()} articles[/green]")
+                        else:
+                            console.print(f"[yellow]⚠️  Parsing issues with {coll.upper()}: {result['stats']['error']}[/yellow]")
+                    else:
+                        console.print(f"[yellow]⚠️  {coll.upper()} collection not found, skipping...[/yellow]")
+            
+            console.print(f"[green]✅ Parsing complete! Total articles: {total_parsed}[/green]")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Parsing failed: {e}[/red]")
+            if not Confirm.ask("[yellow]Continue to indexing anyway?[/yellow]", default=False):
+                raise typer.Exit(1)
+        
+        # Step 5: Indexing
+        console.print(f"\n[bold blue]Step 5: Creating vector search index...[/bold blue]")
+        console.print("[dim]This creates embeddings for semantic search from parsed JSON files...[/dim]")
+        
+        try:
+            # Create AgenticRAG config for indexing (reuse existing one if already created)
+            if 'agentic_rag' not in locals():
+                corpus = CDCCorpus()
+                collection_filter = None if selected_collection == "all" else selected_collection
+                config = AgentConfig(collection_filter=collection_filter or 'all')
+                agentic_rag = AgenticRAG(corpus=corpus, config=config)
+            
+            # Use existing ensure_vector_index method (handles all indexing logic)
+            indexing_success = agentic_rag.ensure_vector_index(console)
+            
+            if not indexing_success:
+                console.print("[yellow]You can still use the system, but search may be limited[/yellow]")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Indexing setup failed: {e}[/red]")
+            console.print("[yellow]You can still use the system, but search may be limited[/yellow]")
+        
+        # Step 6: Launch agentic Q&A
+        console.print(f"\n[bold blue]Step 6: Launching Agentic Q&A System...[/bold blue]")
+        console.print("[dim]Starting multi-agent research assistant...[/dim]")
+        
+        if Confirm.ask("\n[bold green]🚀 Launch Q&A system now?[/bold green]", default=True):
+            try:
+                # Initialize AgenticRAG system
+                corpus = CDCCorpus()
+                
+                collection_filter = None if selected_collection == "all" else selected_collection
+                config = AgentConfig(
+                    collection_filter=collection_filter or 'all',
+                    relevance_cutoff=8,
+                    search_k=10,
+                    max_evidence_pieces=5,
+                    max_search_attempts=3
+                )
+                
+                agentic_rag = AgenticRAG(corpus=corpus, config=config)
+                
+                console.print("\n[bold green]🤖 Welcome to CDC Text Corpora Agentic Q&A![/bold green]")
+                console.print("[dim]Ask questions about CDC research and get comprehensive, cited answers...[/dim]")
+                
+                # Start the interactive Q&A loop
+                agentic_rag.run(console)
+                
+            except Exception as e:
+                console.print(f"[red]❌ Failed to launch Q&A system: {e}[/red]")
+                console.print("[yellow]You can try running: cdc-corpus qa --mode agentic[/yellow]")
+                raise typer.Exit(1)
+        else:
+            console.print("\n[green]✅ Setup complete![/green]")
+            console.print("[blue]To start Q&A later, run: [bold]cdc-corpus qa --mode agentic[/bold][/blue]")
+        
+    except KeyboardInterrupt:
+        console.print("\n[yellow]👋 Setup interrupted by user[/yellow]")
+        raise typer.Exit(0)
+    except Exception as e:
+        console.print(f"\n[red]❌ Unexpected error: {e}[/red]")
+        console.print("[dim]For help, run: cdc-corpus --help[/dim]")
+        raise typer.Exit(1)
+
+
+@app.callback(invoke_without_command=True)
+def main_callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(False, "--version", help="Show version information")
+) -> None:
+    """CDC Text Corpora: Interactive access to PCD, EID, and MMWR collections.
+    
+    Run without arguments for interactive setup, or use specific commands for direct access.
+    """
+    if version:
+        console.print("CDC Text Corpora v1.0.0")
+        raise typer.Exit()
+    
+    # If no subcommand is provided, run the interactive setup
+    if ctx.invoked_subcommand is None:
+        # Call the run command directly
+        ctx.invoke(run)
+
 
 if __name__ == "__main__":
-    main()
+    app()

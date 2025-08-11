@@ -70,7 +70,7 @@ class RAGEngine:
         # Set up persistence directory using standardized utils approach
         if persist_directory is None:
             # Use the corpus manager's data directory to ensure consistency
-            # This ensures ArticleIndexer and RAGEngine use the same base directory
+            # This ensures all components use the same base directory
             corpus_data_dir = corpus_manager.get_data_directory()
             # Ensure the directory exists using utils approach
             ensure_data_directory(str(corpus_data_dir))
@@ -184,10 +184,11 @@ Question: {question}
 Instructions:
 1. Base your answer primarily on the provided CDC context
 2. If the context doesn't contain enough information, clearly state this limitation
-3. Provide specific citations when possible (mention the collection: PCD, EID, or MMWR)
+3. When referencing information from the context, use numbered citations like [1], [2], [3] etc. that correspond to the sources provided
 4. Focus on evidence-based health information
 5. If discussing medical topics, remind users to consult healthcare professionals
 6. Keep your response clear and accessible to a general audience
+7. Do NOT include a references section at the end - citations will be added automatically
 
 Answer:"""
         
@@ -202,19 +203,54 @@ Answer:"""
         )
     
     def _format_docs(self, docs: List[Document]) -> str:
-        """Format retrieved documents for the prompt."""
+        """Format retrieved documents for the prompt with numbered references."""
         formatted_docs = []
-        for doc in docs:
+        for i, doc in enumerate(docs, 1):
             # Extract metadata for citation
             metadata = doc.metadata
             collection = metadata.get('collection', 'Unknown')
             title = metadata.get('title', 'Unknown Title')
             
-            # Format the document with citation info
-            formatted_doc = f"[{collection.upper()}] {title}\n{doc.page_content}\n"
+            # Format the document with numbered reference
+            formatted_doc = f"Source [{i}] - {collection.upper()}: {title}\n{doc.page_content}\n"
             formatted_docs.append(formatted_doc)
         
         return "\n---\n".join(formatted_docs)
+    
+    def format_sources_as_citations(self, sources: List[Dict[str, Any]]) -> str:
+        """Format sources as properly formatted citations text.
+        
+        Args:
+            sources: List of source dictionaries with title, collection, url, excerpt
+            
+        Returns:
+            Formatted citation text that can be appended to answers
+        """
+        if not sources:
+            return ""
+        
+        citations = []
+        citations.append("\n\n## References")
+        
+        for i, source in enumerate(sources, 1):
+            collection = source.get('collection', 'unknown').upper()
+            title = source.get('title', 'Unknown Title')
+            url = source.get('url', '')
+            
+            # Format citation with available information
+            citation_parts = [f"[{i}]"]
+            
+            if title != 'Unknown Title':
+                citation_parts.append(f'"{title}"')
+            
+            citation_parts.append(f"CDC {collection} Collection")
+            
+            if url:
+                citation_parts.append(f"Available at: {url}")
+            
+            citations.append(" ".join(citation_parts))
+        
+        return "\n".join(citations)
     
     def _show_progress_for_operation(self, operation_name: str, emoji: str, operation_func, *args, **kwargs):
         """Show progress indicator for long-running operations."""
@@ -348,7 +384,10 @@ Answer:"""
         print("🔍 Creating vector database with embeddings...")
         print(f"   Processing {total_chunks} chunks with {self.embedding_model_name}...")
         
-        self.vectorstore = Chroma.from_documents(
+        self.vectorstore = self._show_progress_for_operation(
+            "Creating vector database with embeddings",
+            "🔍",
+            Chroma.from_documents,
             documents=chunked_documents,
             embedding=self.embeddings,
             persist_directory=self.persist_directory
@@ -402,7 +441,7 @@ Answer:"""
         if collection_filter:
             filter_dict = {"collection": collection_filter.lower()}
             self.retriever = self.vectorstore.as_retriever(
-                search_type="similarity",
+                search_type="mmr",
                 search_kwargs={"k": k, "filter": filter_dict}
             )
         
@@ -429,7 +468,8 @@ Answer:"""
         self,
         question: str,
         collection_filter: Optional[str] = None,
-        include_sources: bool = True
+        include_sources: bool = True,
+        format_citations: bool = False
     ) -> Dict[str, Any]:
         """
         Ask a question using the RAG system.
@@ -438,6 +478,7 @@ Answer:"""
             question: The question to ask
             collection_filter: Optional collection filter ('pcd', 'eid', 'mmwr')
             include_sources: Whether to include source documents in the response
+            format_citations: Whether to append formatted citations to the answer text
             
         Returns:
             Dictionary with answer and optional sources
@@ -468,12 +509,16 @@ Answer:"""
                 source = {
                     "title": doc.metadata.get("title", "Unknown"),
                     "collection": doc.metadata.get("collection", "unknown"),
-                    "url": doc.metadata.get("url", ""),
-                    "excerpt": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+                    "url": doc.metadata.get("url", "")
                 }
                 sources.append(source)
             
             result["sources"] = sources
+            
+            # Optionally append formatted citations to the answer
+            if format_citations and sources:
+                formatted_citations = self.format_sources_as_citations(sources)
+                result["answer"] = result["answer"] + formatted_citations
         
         return result
     
@@ -521,8 +566,7 @@ Answer:"""
                 source = {
                     "title": doc.metadata.get("title", "Unknown"),
                     "collection": doc.metadata.get("collection", "unknown"),
-                    "url": doc.metadata.get("url", ""),
-                    "excerpt": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
+                    "url": doc.metadata.get("url", "")
                 }
                 sources.append(source)
         

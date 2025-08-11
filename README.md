@@ -35,7 +35,28 @@ uv pip install -e .
 
 ## Quick Start
 
-### 1. Setup API Keys
+### Option 1: Interactive Setup (Recommended)
+
+Run the guided setup process that handles everything automatically:
+
+```bash
+# Launch interactive setup
+cdc-corpus run
+# or simply
+cdc-corpus
+```
+
+This will guide you through:
+1. **Collection Selection**: Choose PCD, EID, MMWR, or all collections
+2. **Language Selection**: Pick from available languages
+3. **Data Download**: Automatically downloads selected collections
+4. **Parsing**: Extracts and structures articles from HTML
+5. **Indexing**: Creates vector database for semantic search
+6. **Q&A Launch**: Starts interactive question-answering session
+
+### Option 2: Manual Setup
+
+#### 1. Setup API Keys
 
 Create a `.env` file in the project root:
 
@@ -52,14 +73,14 @@ DEFAULT_LLM_PROVIDER=anthropic
 DEFAULT_LLM_MODEL=claude-3-5-sonnet
 ```
 
-### 2. Test API Connection
+#### 2. Test API Connection
 
 ```bash
 # Test your API configuration
 uv run tests/test_api_connection.py
 ```
 
-### 3. Download Data
+#### 3. Download Data
 
 ```bash
 # Download all collections
@@ -71,7 +92,7 @@ cdc-corpus download --collection eid
 cdc-corpus download --collection mmwr
 ```
 
-### 4. Parse Articles
+#### 4. Parse Articles
 
 ```bash
 # Parse all collections (English)
@@ -82,7 +103,7 @@ cdc-corpus parse --collection pcd --language en
 cdc-corpus parse --collection eid --language es
 ```
 
-### 5. Start Q&A Session
+#### 5. Start Q&A Session
 
 ```bash
 # Interactive Q&A with all collections
@@ -127,7 +148,7 @@ Options:
 
 ### QA Command
 
-Interactive RAG-based question answering:
+Interactive RAG-based question answering with two modes:
 
 ```bash
 cdc-corpus qa [OPTIONS]
@@ -135,9 +156,182 @@ cdc-corpus qa [OPTIONS]
 Options:
   -c, --collection [pcd|eid|mmwr|all]          Collection to query (default: all)
   -l, --language [en|es|fr|zhs|zht|all]        Language filter (default: en)
+  -m, --mode [sequential|agentic]              QA mode (default: agentic)
   -d, --data-dir TEXT                          Custom data directory
   -v, --verbose                                Show verbose output
 ```
+
+**QA Modes:**
+- **Sequential**: Traditional RAG (question → search → answer)
+- **Agentic**: Multi-agent research system with evidence gathering and synthesis
+
+### Run Command
+
+Interactive guided setup (default when no command specified):
+
+```bash
+cdc-corpus run [OPTIONS]
+# or simply: cdc-corpus
+
+Options:
+  -v, --verbose    Show verbose output
+  --help          Show help message
+```
+
+## Complete Process Flow and Architecture
+
+### Data Pipeline Overview
+
+The CDC Text Corpora package follows a comprehensive 5-stage pipeline:
+
+```
+1. DOWNLOAD:  CDC APIs → ZIP files → html-outputs/
+2. EXTRACT:   ZIP files → HTML files → json-html/  
+3. PARSE:     HTML → structured Article objects → json-parsed/
+4. INDEX:     Articles → embeddings → chroma_db/
+5. QUERY:     Question → semantic search → LLM → answer + citations
+```
+
+### Detailed Command Flows
+
+#### 1. Download Command Flow
+
+**Execution Path**: `CLI → Core Downloader → File System`
+
+```
+cli/main.py:download()
+  ↓
+core/downloader.py:download_collection()
+  ↓
+├─ Metadata: CDC Socrata API → cdc-corpus-data/cdc_corpus_df.csv
+└─ Collections: ZIP downloads → cdc-corpus-data/html-outputs/[collection].zip
+```
+
+**Data Sources:**
+- **PCD**: Preventing Chronic Disease articles (2004-2023)
+- **EID**: Emerging Infectious Diseases articles (1995-2023)
+- **MMWR**: Morbidity and Mortality Weekly Report (1982-2023)
+- **Metadata**: Article metadata via Socrata API
+
+#### 2. Parse Command Flow
+
+**Execution Path**: `ZIP → HTML → Structured JSON`
+
+```
+cli/main.py:parse()
+  ↓
+core/datasets.py:CDCCorpus.load_parse_save_html_articles()
+  ↓
+├─ HTMLArticleLoader: Extract ZIPs → json-html/
+├─ Collection-specific parsers → Article dataclasses
+└─ JSON output → json-parsed/[collection]_[language]_[timestamp].json
+```
+
+**Processing Details:**
+- **HTML Extraction**: Collection-specific folder structures
+  - PCD: `issues/` folder
+  - EID: `article/` folder
+  - MMWR: `preview/mmwrhtml/` and `volumes/` folders
+- **Language Filtering**: `_es.htm`, `_fr.htm`, `_zhs.htm`, `_zht.htm` suffixes
+- **Article Parsing**: Title, abstract, full text, authors, references, metadata
+- **Validation**: Optional article validation with detailed error reporting
+
+#### 3. QA Command Flows (Two Modes)
+
+##### Sequential RAG Mode
+
+**Execution Path**: `Question → Semantic Search → LLM → Answer + Citations`
+
+```
+cli/main.py:qa()
+  ↓
+qa/rag_pipeline.py:RAGPipeline
+  ↓
+qa/rag_engine.py:RAGEngine
+  ↓
+├─ Vector indexing: Articles → ChromaDB embeddings
+└─ Interactive loop: Question → Semantic search → LLM → Answer + citations
+```
+
+**Components:**
+- **Vector Store**: ChromaDB with persistence
+- **Embeddings**: HuggingFace (default: all-MiniLM-L6-v2)
+- **LLMs**: OpenAI (GPT models) or Anthropic (Claude models)
+- **Text Splitter**: 1000 char chunks with 200 char overlap
+- **Retrieval**: Top-k semantic search with metadata filtering
+
+##### Agentic RAG Mode
+
+**Execution Path**: `Multi-Agent Research → Evidence Synthesis → Comprehensive Answer`
+
+```
+cli/main.py:qa()
+  ↓
+qa/rag_agent.py:AgenticRAG
+  ↓
+Multi-agent system with specialized tools:
+├─ Search Tool: Semantic search → passages
+├─ Evidence Tool: Relevance scoring (1-10) → filtered evidence  
+└─ Answer Tool: Evidence synthesis → comprehensive answer
+  ↓
+Orchestrator: Search → Gather Evidence → Generate Answer
+```
+
+**Agent Capabilities:**
+- **Collection-specific instructions**: Tailored for PCD/EID/MMWR content
+- **Multi-turn workflow**: Iterative research and evidence gathering
+- **Configurable parameters**: Evidence pieces, relevance cutoff, search attempts
+- **Async execution**: Parallel processing with rich status updates
+
+#### 4. Run Command Flow (Interactive Setup)
+
+**Execution Path**: `Guided Workflow → Complete Pipeline → Q&A Session`
+
+```
+cdc-corpus run
+  ↓
+Interactive guided workflow:
+├─ 1. Collection selection & download
+├─ 2. Language selection & parsing  
+├─ 3. Vector indexing
+└─ 4. Launch agentic Q&A
+```
+
+### Architecture Components
+
+#### Data Management Layer
+- **CDCCorpus**: Main orchestrator for all data operations
+- **ArticleCollection**: Memory-efficient iterator using generators
+- **HTMLArticleLoader**: ZIP extraction and HTML file loading
+- **Data Directories**: Standardized via `utils/config.py`
+
+#### Parsing Architecture
+- **Collection-specific parsers**: PCD/EID/MMWR specialized parsing logic
+- **Article dataclass**: Structured representation with validation
+- **Factory pattern**: `create_parser()` for parser instantiation
+- **Error handling**: Graceful degradation with user feedback
+
+#### RAG Architecture
+- **RAGEngine**: Core semantic search and QA engine
+  - LangChain integration for LLM orchestration
+  - ChromaDB for vector storage and retrieval
+  - HuggingFace embeddings for semantic search
+  - Supports OpenAI and Anthropic LLMs
+- **RAGPipeline**: Traditional sequential RAG workflow
+- **AgenticRAG**: Multi-agent research system with specialized tools
+
+#### Configuration Management
+- **Environment variables**: API keys, model configurations
+- **Data directory resolution**: User-centric data storage
+- **Collection validation**: Ensures valid collection/language combinations
+
+### Memory Management and Performance
+
+- **Streaming Processing**: ArticleCollection uses generators for large datasets
+- **Lazy Loading**: JSON files loaded on-demand
+- **Progress Tracking**: Rich progress bars throughout pipeline
+- **Error Recovery**: Graceful handling with detailed user feedback
+- **Vector Caching**: Persistent ChromaDB storage for efficient retrieval
 
 ## Programming Interface
 
