@@ -1,13 +1,9 @@
 """Refactored RAG Engine for CDC Text Corpora using composition pattern."""
 
-from typing import List, Dict, Any, Optional, Iterator
+from typing import List, Dict, Any, Optional
 import os
-from pathlib import Path
+import asyncio
 from dotenv import load_dotenv
-from langchain_core.documents import Document
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from cdc_text_corpora.core.datasets import CDCCorpus
@@ -22,12 +18,12 @@ load_dotenv()
 class RAGEngine:
     """
     RAG-based question answering engine for CDC Text Corpora.
-    
+
     This refactored class uses composition to delegate vector operations to VectorStoreManager
-    and document processing to ArticleProcessor, while focusing on LLM operations and 
+    and document processing to ArticleProcessor, while focusing on LLM operations and
     question-answering pipeline management.
     """
-    
+
     def __init__(
         self,
         corpus_manager: CDCCorpus,
@@ -36,11 +32,17 @@ class RAGEngine:
         llm_provider: Optional[str] = None,
         chunk_size: Optional[int] = None,
         chunk_overlap: Optional[int] = None,
-        persist_directory: Optional[str] = None
+        persist_directory: Optional[str] = None,
+        # Agentic configuration parameters
+        default_collection_filter: str = 'all',
+        relevance_cutoff: int = 8,
+        search_k: int = 10,
+        max_evidence_pieces: int = 5,
+        max_search_attempts: int = 3
     ) -> None:
         """
         Initialize the RAG engine.
-        
+
         Args:
             corpus_manager: CDCCorpus instance for accessing parsed articles
             embedding_model: Name of the embedding model to use (defaults to env var or all-MiniLM-L6-v2)
@@ -49,9 +51,14 @@ class RAGEngine:
             chunk_size: Size of text chunks for embedding (defaults to env var or 1000)
             chunk_overlap: Overlap between chunks (defaults to env var or 200)
             persist_directory: Directory to persist ChromaDB data (defaults to env var or data_dir/chroma_db)
+            default_collection_filter: Default collection filter for agentic RAG
+            relevance_cutoff: Minimum relevance score for evidence (1-10)
+            search_k: Number of search results to retrieve
+            max_evidence_pieces: Maximum pieces of evidence to gather
+            max_search_attempts: Maximum search attempts before generating answer
         """
         self.corpus_manager = corpus_manager
-        
+
         # Load configuration from environment variables with fallbacks
         self.embedding_model_name = embedding_model or os.getenv("DEFAULT_EMBEDDING_MODEL") or "all-MiniLM-L6-v2"
         self.llm_model_name = llm_model or os.getenv("DEFAULT_LLM_MODEL") or "gpt-4o-mini"
@@ -59,50 +66,57 @@ class RAGEngine:
         self.llm_provider = provider.lower() if provider else "openai"
         self.chunk_size = chunk_size or int(os.getenv("DEFAULT_CHUNK_SIZE", "1000"))
         self.chunk_overlap = chunk_overlap or int(os.getenv("DEFAULT_CHUNK_OVERLAP", "200"))
-        
+
+        # Store agentic configuration as instance properties
+        self.default_collection_filter = default_collection_filter
+        self.relevance_cutoff = relevance_cutoff
+        self.search_k = search_k
+        self.max_evidence_pieces = max_evidence_pieces
+        self.max_search_attempts = max_search_attempts
+
         # Validate LLM provider
         if self.llm_provider not in ["openai", "anthropic"]:
             raise ValueError(f"Invalid LLM provider '{self.llm_provider}'. Must be 'openai' or 'anthropic'")
-        
+
         # Set up persistence directory
         if persist_directory is None:
             # Use the corpus manager's data directory to ensure consistency
             corpus_data_dir = corpus_manager.get_data_directory()
             ensure_data_directory(str(corpus_data_dir))
-            
+
             chroma_dir = corpus_data_dir / "chroma_db"
             chroma_dir.mkdir(exist_ok=True)
             persist_directory = str(chroma_dir)
-        
+
         self.persist_directory = persist_directory
-        
+
         # Initialize composed components
         self.article_processor = ArticleProcessor(
             corpus_manager=corpus_manager,
             chunk_size=self.chunk_size,
             chunk_overlap=self.chunk_overlap
         )
-        
+
         self.vector_store = VectorStoreManager(
             embedding_model=self.embedding_model_name,
             persist_directory=self.persist_directory
         )
-        
+
         # Initialize LLM components
         self.llm: Any = None
-        self.rag_chain: Any = None
-        
-        # Initialize LLM and RAG chain
+
+        # Agentic RAG components (initialized lazily)
+        self._agent_config: Any = None
+        self._agentic_rag: Any = None
+
+        # Initialize LLM
         self._initialize_llm_components()
-    
+
     def _initialize_llm_components(self) -> None:
-        """Initialize LLM and RAG chain components."""
+        """Initialize LLM components."""
         # Initialize LLM based on provider
         self.llm = self._initialize_llm()
-        
-        # Create RAG chain
-        self._create_rag_chain()
-    
+
     def _initialize_llm(self) -> Any:
         """Initialize LLM based on the specified provider."""
         if self.llm_provider == "openai":
@@ -119,51 +133,59 @@ class RAGEngine:
                 "claude-3-5-sonnet": "claude-3-5-sonnet-20241022",
                 "claude-3-5-haiku": "claude-3-5-haiku-20241022"
             }
-            
+
             # Use the provided model name or map it if it's a common alias
             model_name = anthropic_models.get(self.llm_model_name, self.llm_model_name)
-            
+
             return ChatAnthropic(
                 model=model_name,
                 temperature=0.1
             )
         else:
             raise ValueError(f"Unsupported LLM provider: {self.llm_provider}")
-    
-    def _create_rag_chain(self) -> None:
-        """Create the RAG chain for question answering."""
-        # Define the prompt template for CDC context
-        prompt_template = """You are an expert assistant specializing in CDC (Centers for Disease Control and Prevention) health information. Use the following context from CDC publications to answer the question accurately and comprehensively.
 
-Context from CDC publications:
-{context}
+    @property
+    def agent_config(self) -> Any:
+        """
+        Lazy property for AgentConfig initialization.
 
-Question: {question}
+        Returns:
+            AgentConfig instance with current RAGEngine settings
+        """
+        if self._agent_config is None:
+            # Import here to avoid circular imports
+            from .rag_agent import AgentConfig
 
-Instructions:
-1. Base your answer primarily on the provided CDC context
-2. If the context doesn't contain enough information, clearly state this limitation
-3. When referencing information from the context, use numbered citations like [1], [2], [3] etc. that correspond to the sources provided
-4. Focus on evidence-based health information
-5. If discussing medical topics, remind users to consult healthcare professionals
-6. Keep your response clear and accessible to a general audience
-7. Do NOT include a references section at the end - citations will be added automatically
+            self._agent_config = AgentConfig(
+                collection_filter=self.default_collection_filter,
+                relevance_cutoff=self.relevance_cutoff,
+                search_k=self.search_k,
+                max_evidence_pieces=self.max_evidence_pieces,
+                max_search_attempts=self.max_search_attempts,
+                model_name=self.llm_model_name
+            )
 
-Answer:"""
-        
-        prompt = ChatPromptTemplate.from_template(prompt_template)
-        
-        # Get retriever from vector store
-        retriever = self.vector_store.get_retriever()
-        
-        # Create the RAG chain
-        self.rag_chain = (
-            {"context": retriever | self.article_processor.format_docs_for_context, "question": RunnablePassthrough()}
-            | prompt
-            | self.llm
-            | StrOutputParser()
-        )
-    
+        return self._agent_config
+
+    @property
+    def agentic_rag(self) -> Any:
+        """
+        Lazy property for AgenticRAG initialization.
+
+        Returns:
+            AgenticRAG instance configured with this RAGEngine
+        """
+        if self._agentic_rag is None:
+            # Import here to avoid circular imports
+            from .rag_agent import AgenticRAG
+
+            self._agentic_rag = AgenticRAG(
+                corpus=self.corpus_manager,
+                config=self.agent_config
+            )
+
+        return self._agentic_rag
+
     def index_articles(
         self,
         collection: Optional[str] = None,
@@ -171,11 +193,11 @@ Answer:"""
     ) -> Dict[str, Any]:
         """
         Index articles from parsed JSON files into the vector database.
-        
+
         Args:
             collection: Collection to index ('pcd', 'eid', 'mmwr'). If None, indexes all
             language: Language filter for articles
-            
+
         Returns:
             Dictionary with indexing statistics
         """
@@ -184,7 +206,7 @@ Answer:"""
             collection=collection,
             language=language
         )
-        
+
         if not articles:
             print("No articles found to index.")
             return {
@@ -194,13 +216,13 @@ Answer:"""
                 "language": language,
                 "embedding_model": self.embedding_model_name
             }
-        
+
         # Convert articles to documents
         documents = self.article_processor.create_documents(articles)
-        
+
         # Chunk documents
         chunked_documents = self.article_processor.chunk_documents(documents)
-        
+
         if not chunked_documents:
             print("No valid documents found after processing.")
             return {
@@ -210,22 +232,78 @@ Answer:"""
                 "language": language,
                 "embedding_model": self.embedding_model_name
             }
-        
+
         # Index documents using vector store
         index_stats = self.vector_store.index_documents(chunked_documents)
-        
-        # Recreate RAG chain with updated retriever
-        self._create_rag_chain()
-        
+
         # Update stats with collection info
         index_stats.update({
             "collection": collection or "all",
             "language": language,
             "articles_processed": len(articles)
         })
-        
+
         return index_stats
-    
+
+    def index_html_articles(
+        self,
+        collection: Optional[str] = None,
+        language: str = 'en'
+    ) -> Dict[str, Any]:
+        """
+        Index articles from HTML files directly into the vector database.
+
+        Uses structure-aware HTML chunking with optimized CDC headers
+        to preserve document semantics during indexing.
+
+        Args:
+            collection: Collection to index ('pcd', 'eid', 'mmwr'). If None, indexes all
+            language: Language filter for articles
+
+        Returns:
+            Dictionary with indexing statistics
+        """
+        # Load HTML articles using article processor
+        html_articles = self.article_processor.load_html_articles(
+            collection=collection,
+            language=language
+        )
+
+        if not html_articles:
+            print("No HTML articles found to index.")
+            return {
+                "articles_processed": 0,
+                "total_chunks": 0,
+                "collection": collection or "all",
+                "language": language,
+                "embedding_model": self.embedding_model_name
+            }
+
+        # Chunk HTML documents using structure-aware splitting
+        chunked_documents = self.article_processor.chunk_html_documents(html_articles)
+
+        if not chunked_documents:
+            print("No valid documents found after HTML processing.")
+            return {
+                "articles_processed": 0,
+                "total_chunks": 0,
+                "collection": collection or "all",
+                "language": language,
+                "embedding_model": self.embedding_model_name
+            }
+
+        # Index documents using vector store
+        index_stats = self.vector_store.index_documents(chunked_documents)
+
+        # Update stats with collection info
+        index_stats.update({
+            "collection": collection or "all",
+            "language": language,
+            "articles_processed": len(html_articles)
+        })
+
+        return index_stats
+
     def semantic_search(
         self,
         query: str,
@@ -234,12 +312,12 @@ Answer:"""
     ) -> List[Dict[str, Any]]:
         """
         Perform semantic search on the indexed articles.
-        
+
         Args:
             query: Search query
             k: Number of results to return
             collection_filter: Optional collection filter ('pcd', 'eid', 'mmwr')
-            
+
         Returns:
             List of search results with metadata
         """
@@ -249,241 +327,58 @@ Answer:"""
             collection_filter=collection_filter,
             search_type="mmr"
         )
-    
-    def ask_question(
-        self,
-        question: str,
-        collection_filter: Optional[str] = None,
-        include_sources: bool = True,
-        format_citations: bool = False
-    ) -> Dict[str, Any]:
-        """
-        Ask a question using the RAG system.
-        
-        Args:
-            question: The question to ask
-            collection_filter: Optional collection filter ('pcd', 'eid', 'mmwr')
-            include_sources: Whether to include source documents in the response
-            format_citations: Whether to append formatted citations to the answer text
-            
-        Returns:
-            Dictionary with answer and optional sources
-        """
-        # Update retriever with collection filter if specified
-        if collection_filter:
-            retriever = self.vector_store.get_retriever(
-                search_type="similarity",
-                k=5,
-                collection_filter=collection_filter
-            )
-            
-            # Update RAG chain with filtered retriever
-            prompt_template = """You are an expert assistant specializing in CDC (Centers for Disease Control and Prevention) health information. Use the following context from CDC publications to answer the question accurately and comprehensively.
 
-Context from CDC publications:
-{context}
-
-Question: {question}
-
-Instructions:
-1. Base your answer primarily on the provided CDC context
-2. If the context doesn't contain enough information, clearly state this limitation
-3. When referencing information from the context, use numbered citations like [1], [2], [3] etc. that correspond to the sources provided
-4. Focus on evidence-based health information
-5. If discussing medical topics, remind users to consult healthcare professionals
-6. Keep your response clear and accessible to a general audience
-7. Do NOT include a references section at the end - citations will be added automatically
-
-Answer:"""
-            
-            prompt = ChatPromptTemplate.from_template(prompt_template)
-            
-            # Create temporary RAG chain with filtered retriever
-            rag_chain = (
-                {"context": retriever | self.article_processor.format_docs_for_context, "question": RunnablePassthrough()}
-                | prompt
-                | self.llm
-                | StrOutputParser()
-            )
-            
-            answer = rag_chain.invoke(question)
-        else:
-            # Use default RAG chain
-            answer = self.rag_chain.invoke(question)
-        
-        result = {
-            "question": question,
-            "answer": answer,
-            "collection_filter": collection_filter
-        }
-        
-        # Include source documents if requested
-        if include_sources:
-            # Get source documents using semantic search
-            search_results = self.semantic_search(
-                query=question,
-                k=5,
-                collection_filter=collection_filter
-            )
-            
-            sources = []
-            for search_result in search_results:
-                source = {
-                    "title": search_result["title"],
-                    "collection": search_result["collection"],
-                    "url": search_result["url"]
-                }
-                sources.append(source)
-            
-            result["sources"] = sources
-            
-            # Optionally append formatted citations to the answer
-            if format_citations and sources:
-                formatted_citations = self.format_sources_as_citations(sources)
-                result["answer"] = result["answer"] + formatted_citations
-        
-        return result
-    
-    def ask_question_stream(
-        self,
-        question: str,
-        collection_filter: Optional[str] = None,
-        include_sources: bool = True
-    ) -> Iterator[Dict[str, Any]]:
-        """
-        Ask a question using the RAG system with streaming response.
-        
-        Args:
-            question: The question to ask
-            collection_filter: Optional collection filter ('pcd', 'eid', 'mmwr')
-            include_sources: Whether to include source documents in the response
-            
-        Yields:
-            Dictionary with streaming chunks and optional sources
-        """
-        # Get sources first if requested
-        sources = []
-        if include_sources:
-            search_results = self.semantic_search(
-                query=question,
-                k=5,
-                collection_filter=collection_filter
-            )
-            
-            for search_result in search_results:
-                source = {
-                    "title": search_result["title"],
-                    "collection": search_result["collection"],
-                    "url": search_result["url"]
-                }
-                sources.append(source)
-        
-        # Determine which RAG chain to use
-        if collection_filter:
-            retriever = self.vector_store.get_retriever(
-                search_type="similarity",
-                k=5,
-                collection_filter=collection_filter
-            )
-            
-            prompt_template = """You are an expert assistant specializing in CDC (Centers for Disease Control and Prevention) health information. Use the following context from CDC publications to answer the question accurately and comprehensively.
-
-Context from CDC publications:
-{context}
-
-Question: {question}
-
-Instructions:
-1. Base your answer primarily on the provided CDC context
-2. If the context doesn't contain enough information, clearly state this limitation
-3. When referencing information from the context, use numbered citations like [1], [2], [3] etc. that correspond to the sources provided
-4. Focus on evidence-based health information
-5. If discussing medical topics, remind users to consult healthcare professionals
-6. Keep your response clear and accessible to a general audience
-7. Do NOT include a references section at the end - citations will be added automatically
-
-Answer:"""
-            
-            prompt = ChatPromptTemplate.from_template(prompt_template)
-            
-            rag_chain = (
-                {"context": retriever | self.article_processor.format_docs_for_context, "question": RunnablePassthrough()}
-                | prompt
-                | self.llm
-                | StrOutputParser()
-            )
-        else:
-            rag_chain = self.rag_chain
-        
-        # Stream the answer
-        for chunk in rag_chain.stream(question):
-            yield {
-                "question": question,
-                "chunk": chunk,
-                "collection_filter": collection_filter,
-                "sources": sources if include_sources else None
-            }
-    
-    def format_sources_as_citations(self, sources: List[Dict[str, Any]]) -> str:
-        """Format sources as properly formatted citations text.
-        
-        Args:
-            sources: List of source dictionaries with title, collection, url, excerpt
-            
-        Returns:
-            Formatted citation text that can be appended to answers
-        """
-        if not sources:
-            return ""
-        
-        citations = []
-        citations.append("\n\n## References")
-        
-        for i, source in enumerate(sources, 1):
-            collection = source.get('collection', 'unknown').upper()
-            title = source.get('title', 'Unknown Title')
-            url = source.get('url', '')
-            
-            # Format citation with available information
-            citation_parts = [f"[{i}]"]
-            
-            if title != 'Unknown Title':
-                citation_parts.append(f'"{title}"')
-            
-            citation_parts.append(f"CDC {collection} Collection")
-            
-            if url:
-                citation_parts.append(f"Available at: {url}")
-            
-            citations.append(" ".join(citation_parts))
-        
-        return "\n".join(citations)
-    
     # Delegate vector store operations
     def get_vectorstore_stats(self) -> Dict[str, Any]:
         """Get statistics about the vector store."""
         return self.vector_store.get_stats()
-    
-    def clear_vectorstore(self) -> None:
-        """Clear all documents from the vector store."""
-        self.vector_store.clear()
-        # Recreate RAG chain after clearing
-        self._create_rag_chain()
-    
+
+    def check_index_availability(self) -> Dict[str, Any]:
+        """
+        Check if vector index is available and return structured status.
+
+        Returns:
+            Dictionary with index availability status, stats, and total document count
+        """
+        result: Dict[str, Any] = {
+            "index_exists": False,
+            "total_documents": 0,
+            "stats": {},
+            "error": None
+        }
+
+        try:
+            vector_stats = self.get_vectorstore_stats()
+            result["stats"] = vector_stats
+
+            if "total_documents" in vector_stats and vector_stats["total_documents"] > 0:
+                result["index_exists"] = True
+                result["total_documents"] = vector_stats["total_documents"]
+            else:
+                result["index_exists"] = False
+                result["total_documents"] = 0
+
+        except Exception as e:
+            result["index_exists"] = False
+            result["total_documents"] = 0
+            result["error"] = str(e)
+
+        return result
+
     # LLM management methods
-    
+
     def test_llm_connection(self, test_message: str = "Hello! Please respond with 'Connection successful.'") -> Dict[str, Any]:
         """
         Test the connection to the current LLM.
-        
+
         Args:
             test_message: Simple message to send to the LLM for testing
-            
+
         Returns:
             Dictionary with test results including success status, response, and timing
         """
         import time
-        
+
         test_result: Dict[str, Any] = {
             "provider": self.llm_provider,
             "model": self.llm_model_name,
@@ -493,7 +388,7 @@ Answer:"""
             "response_time": None,
             "api_key_configured": False
         }
-        
+
         # Check if API key is configured
         if self.llm_provider == "openai":
             api_key = os.getenv("OPENAI_API_KEY")
@@ -501,29 +396,222 @@ Answer:"""
         elif self.llm_provider == "anthropic":
             api_key = os.getenv("ANTHROPIC_API_KEY")
             test_result["api_key_configured"] = bool(api_key and api_key.strip())
-        
+
         if not test_result["api_key_configured"]:
             test_result["error"] = f"API key not configured for {self.llm_provider}. Please set {self.llm_provider.upper()}_API_KEY in your .env file."
             return test_result
-        
+
         try:
             start_time = time.time()
-            
+
             # Test the LLM with a simple message
             response = self.llm.invoke(test_message)
-            
+
             end_time = time.time()
-            
+
             test_result["success"] = True
             test_result["response"] = response.content if hasattr(response, 'content') else str(response)
             test_result["response_time"] = round(end_time - start_time, 2)
-            
+
         except Exception as e:
             test_result["error"] = str(e)
             test_result["response_time"] = round(time.time() - start_time, 2) if 'start_time' in locals() else None
-        
+
         return test_result
-    
+
+    def check_data_availability(self, collection_filter: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Check if parsed JSON data is available for the RAG pipeline.
+
+        This method focuses only on checking parsed JSON files and article availability,
+        not vector index status. Use check_index_availability() for index checking.
+
+        Args:
+            collection_filter: Optional collection filter to check specific collections
+
+        Returns:
+            Dictionary with JSON data availability status
+        """
+        status: Dict[str, Any] = {
+            "parsed_articles_available": False,
+            "collections_found": [],
+            "total_articles": 0,
+            "recommendations": []
+        }
+
+        # Check for parsed JSON files
+        json_parsed_dir = self.corpus_manager.get_data_directory() / "json-parsed"
+
+        if json_parsed_dir.exists():
+            # Determine collections to check based on filter
+            collections_to_check = (
+                [collection_filter]
+                if collection_filter and collection_filter != 'all'
+                else ['pcd', 'eid', 'mmwr']
+            )
+
+            for collection in collections_to_check:
+                # Look for any language files for this collection
+                pattern = f"{collection}_*_*.json"
+                json_files = list(json_parsed_dir.glob(pattern))
+                if json_files:
+                    status["collections_found"].append(collection)
+
+            if status["collections_found"]:
+                status["parsed_articles_available"] = True
+
+                # Count total articles using the corpus iterable
+                try:
+                    articles = self.corpus_manager.load_json_articles_as_iterable(
+                        collection=collection_filter if collection_filter != 'all' else None,
+                        language='en'  # Default to English for counting
+                    )
+                    status["total_articles"] = len(articles)
+                except Exception:
+                    status["total_articles"] = 0
+
+        # Generate recommendations based on data availability
+        if not status["parsed_articles_available"]:
+            status["recommendations"].append("Parse some collections first using: cdc-corpus parse --collection <name>")
+
+        return status
+
+    def create_vector_index(
+        self, 
+        collection: Optional[str] = None, 
+        language: str = 'en',
+        source_type: str = 'json'
+    ) -> Dict[str, Any]:
+        """
+        Create vector index for articles without UI interactions.
+
+        This method supports two indexing approaches:
+        - 'json': Uses parsed JSON articles with structured metadata
+        - 'html': Uses raw HTML files with structure-aware chunking (preserves document semantics)
+
+        Args:
+            collection: Collection to index ('pcd', 'eid', 'mmwr'). If None, indexes all
+            language: Language filter for articles
+            source_type: Source data type to use ('json' or 'html'). Defaults to 'json'
+
+        Returns:
+            Dictionary with indexing results including success status and stats
+
+        Raises:
+            ValueError: If source_type is not 'json' or 'html'
+        """
+        # Validate source_type parameter
+        valid_source_types = ['json', 'html']
+        if source_type not in valid_source_types:
+            raise ValueError(f"Invalid source_type '{source_type}'. Must be one of: {valid_source_types}")
+
+        result: Dict[str, Any] = {
+            "success": False,
+            "error": None,
+            "stats": {},
+            "source_type": source_type
+        }
+
+        # Check if index already exists using the dedicated method
+        index_status = self.check_index_availability()
+        if index_status["index_exists"]:
+            result["success"] = True
+            result["stats"] = index_status["stats"]
+            result["stats"]["already_exists"] = True
+            return result
+
+        # Conditional data availability check based on source type
+        if source_type == 'json':
+            # Check if we have parsed JSON articles to index
+            status = self.check_data_availability(collection)
+            if not status["parsed_articles_available"]:
+                result["error"] = "No parsed JSON articles found for indexing. Run 'cdc-corpus parse' first."
+                return result
+        # For HTML indexing, we skip the parsed JSON check as it works directly with extracted HTML files
+
+        # Perform indexing based on source type
+        try:
+            if source_type == 'json':
+                index_stats = self.index_articles(
+                    collection=collection,
+                    language=language
+                )
+            else:  # source_type == 'html'
+                index_stats = self.index_html_articles(
+                    collection=collection,
+                    language=language
+                )
+
+            result["success"] = True
+            result["stats"] = index_stats
+            result["stats"]["already_exists"] = False
+
+        except Exception as e:
+            source_context = "JSON articles" if source_type == 'json' else "HTML files"
+            result["error"] = f"Error indexing {source_context}: {str(e)}"
+
+        return result
+
+    def generate_answer(
+        self,
+        question: str,
+        collection_filter: Optional[str] = None,
+        max_turns: int = 10,
+        relevance_cutoff: Optional[int] = None,
+        search_k: Optional[int] = None,
+        max_evidence_pieces: Optional[int] = None,
+        max_search_attempts: Optional[int] = None
+    ) -> str:
+        """
+        Generate an answer to a question using the agentic RAG system.
+
+        This method provides a simple synchronous interface to the sophisticated
+        multi-agent Q&A system, handling the asyncio complexity internally.
+        Uses the RAGEngine's configured agentic components.
+
+        Args:
+            question: The research question to answer
+            collection_filter: Optional collection filter ('pcd', 'eid', 'mmwr', 'all').
+                             If None, uses RAGEngine's default_collection_filter
+            max_turns: Maximum number of agent decision cycles
+            relevance_cutoff: Minimum relevance score for evidence (1-10). If None, uses RAGEngine default
+            search_k: Number of search results to retrieve. If None, uses RAGEngine default
+            max_evidence_pieces: Maximum pieces of evidence to gather. If None, uses RAGEngine default
+            max_search_attempts: Maximum search attempts before generating answer. If None, uses RAGEngine default
+
+        Returns:
+            The generated answer as a string
+
+        Raises:
+            Exception: If the agentic RAG system encounters an error
+        """
+        # Use instance defaults if parameters not provided, otherwise create custom config
+        if any(param is not None for param in [collection_filter, relevance_cutoff, search_k, max_evidence_pieces, max_search_attempts]):
+            # Create custom configuration for this call
+            from .rag_agent import AgenticRAG, AgentConfig
+
+            custom_config = AgentConfig(
+                collection_filter=collection_filter or self.default_collection_filter,
+                relevance_cutoff=relevance_cutoff or self.relevance_cutoff,
+                search_k=search_k or self.search_k,
+                max_evidence_pieces=max_evidence_pieces or self.max_evidence_pieces,
+                max_search_attempts=max_search_attempts or self.max_search_attempts,
+                model_name=self.llm_model_name
+            )
+
+            custom_agentic_rag = AgenticRAG(corpus=self.corpus_manager, config=custom_config)
+            agentic_system = custom_agentic_rag
+        else:
+            # Use the pre-configured instance agentic RAG system
+            agentic_system = self.agentic_rag
+
+        # Run the agentic workflow synchronously
+        try:
+            answer = asyncio.run(agentic_system.ask_question(question, max_turns=max_turns))
+            return answer
+        except Exception as e:
+            raise Exception(f"Agentic RAG system error: {str(e)}")
+
     def __repr__(self) -> str:
         """String representation of the RAG engine."""
         return f"RAGEngine(embedding_model='{self.embedding_model_name}', llm_model='{self.llm_model_name}', llm_provider='{self.llm_provider}')"
