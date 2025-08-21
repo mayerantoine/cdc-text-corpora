@@ -290,7 +290,7 @@ class CDCCorpus:
             raise ValueError(f"Invalid collection '{collection}'. Valid options: ['pcd', 'eid', 'mmwr']")
         
         # Step 1: Load HTML files
-        loader = HTMLArticleLoader(collection.lower(), '', language)
+        loader = HTMLArticleLoader(collection.lower(),'', language)
         loader.load_from_file()
         
         if not loader.articles_html:

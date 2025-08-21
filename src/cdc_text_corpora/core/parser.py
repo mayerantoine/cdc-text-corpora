@@ -326,7 +326,6 @@ class CDCArticleParser(ABC):
                     authors.append(clean_name)
         return authors
 
-
     def filter_articles(self) -> Dict[str, str]:
         """Filter out cover articles and other non-content pages."""
         filtered: Dict[str, str] = {}

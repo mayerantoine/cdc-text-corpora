@@ -175,13 +175,12 @@ cdc-corpus qa [OPTIONS]
 Options:
   -c, --collection [pcd|eid|mmwr|all]          Collection to query (default: all)
   -l, --language [en|es|fr|zhs|zht|all]        Language filter (default: en)
-  -m, --mode [sequential|agentic]              QA mode (default: agentic)
+  -m, --mode [agentic]                         QA mode (default: agentic)
   -d, --data-dir TEXT                          Custom data directory
   -v, --verbose                                Show verbose output
 ```
 
-**QA Modes:**
-- **Sequential**: Traditional RAG (question → search → answer)
+**QA Mode:**
 - **Agentic**: Multi-agent research system with evidence gathering and synthesis
 
 ### Run Command
@@ -255,29 +254,7 @@ core/datasets.py:CDCCorpus.load_parse_save_html_articles()
 - **Article Parsing**: Title, abstract, full text, authors, references, metadata
 - **Validation**: Optional article validation with detailed error reporting
 
-#### 3. QA Command Flows (Two Modes)
-
-##### Sequential RAG Mode
-
-**Execution Path**: `Question → Semantic Search → LLM → Answer + Citations`
-
-```
-cli/main.py:qa()
-  ↓
-qa/rag_pipeline.py:RAGPipeline
-  ↓
-qa/rag_engine.py:RAGEngine
-  ↓
-├─ Vector indexing: Articles → ChromaDB embeddings
-└─ Interactive loop: Question → Semantic search → LLM → Answer + citations
-```
-
-**Components:**
-- **Vector Store**: ChromaDB with persistence
-- **Embeddings**: HuggingFace (default: all-MiniLM-L6-v2)
-- **LLMs**: OpenAI (GPT models) or Anthropic (Claude models)
-- **Text Splitter**: 1000 char chunks with 200 char overlap
-- **Retrieval**: Top-k semantic search with metadata filtering
+#### 3. QA Command Flow
 
 ##### Agentic RAG Mode
 
@@ -336,7 +313,6 @@ Interactive guided workflow:
   - ChromaDB for vector storage and retrieval
   - HuggingFace embeddings for semantic search
   - Supports OpenAI and Anthropic LLMs
-- **RAGPipeline**: Traditional sequential RAG workflow
 - **AgenticRAG**: Multi-agent research system with specialized tools
 
 #### Configuration Management
@@ -377,7 +353,7 @@ stats = corpus.get_collection_stats("pcd")
 ### RAG Question Answering
 
 ```python
-from cdc_text_corpora.qa import RAGEngine, RAGPipeline
+from cdc_text_corpora.qa import RAGEngine
 
 # Initialize RAG engine
 rag = RAGEngine(corpus, llm_provider="anthropic")
@@ -397,12 +373,21 @@ for source in result['sources']:
     print(f"Source: {source['title']}")
 ```
 
-### Interactive Pipeline
+### Interactive Agentic RAG
 
 ```python
-# Run complete RAG pipeline
-pipeline = RAGPipeline(collection_filter="eid", language="en")
-pipeline.run()  # Starts interactive Q&A session
+from cdc_text_corpora.qa import AgenticRAG, AgentConfig
+
+# Create agent configuration
+config = AgentConfig(
+    collection_filter="eid",
+    relevance_cutoff=8,
+    max_evidence_pieces=5
+)
+
+# Initialize and run agentic RAG
+agentic_rag = AgenticRAG(config=config)
+agentic_rag.run()  # Starts interactive Q&A session
 ```
 
 ## Configuration
