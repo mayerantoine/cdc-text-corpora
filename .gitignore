@@ -168,4 +168,4 @@ uv.lock
 ## Project-specific
 # Persistent Chroma SQLiteDB
 .chromadb/
-*.sqlite3
+*.sqlite3src/cdc_text_corpora/data/chroma_index.tar.xz

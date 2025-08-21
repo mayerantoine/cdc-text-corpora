@@ -99,7 +99,8 @@ class RAGEngine:
 
         self.vector_store = VectorStoreManager(
             embedding_model=self.embedding_model_name,
-            persist_directory=self.persist_directory
+            persist_directory=self.persist_directory,
+            corpus_manager=corpus_manager
         )
 
         # Initialize LLM components

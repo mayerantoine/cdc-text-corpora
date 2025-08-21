@@ -86,22 +86,41 @@ This will guide you through:
 
 ### Option 2: Manual Setup
 
-#### 1. Test API Connection
+#### Option 2A: Quick Start with Bundled Index
+
+Get started immediately using the pre-built index included with the package:
 
 ```bash
 # Make sure virtual environment is activated
 source .venv/bin/activate  # On Linux/macOS (.venv\Scripts\activate on Windows)
 
+# Extract bundled pre-built index for immediate use
+cdc-corpus index --use-bundled
+
+# Start Q&A session right away (requires API keys)
+cdc-corpus qa
+```
+
+**Benefits of Bundled Index:**
+- ✅ Instant setup - no download/parsing required
+- ✅ Pre-built from all collections and languages  
+- ✅ Professionally optimized embeddings
+- ⚠️ ~1.2GB disk space required after extraction
+
+#### Option 2B: Build Fresh Index from Data
+
+Build your own index from the latest CDC data:
+
+##### 1. Test API Connection
+
+```bash
 # Test your API configuration
 uv run tests/test_api_connection.py
 ```
 
-#### 2. Download Data
+##### 2. Download Data
 
 ```bash
-# Make sure virtual environment is activated (if not already)
-source .venv/bin/activate
-
 # Download all collections
 cdc-corpus download --collection all
 
@@ -111,7 +130,7 @@ cdc-corpus download --collection eid
 cdc-corpus download --collection mmwr
 ```
 
-#### 3. Parse Articles
+##### 3. Parse Articles
 
 ```bash
 # Parse all collections (English)
@@ -122,17 +141,15 @@ cdc-corpus parse --collection pcd --language en
 cdc-corpus parse --collection eid --language es
 ```
 
-#### 4. Start Q&A Session (Requires API Keys)
+##### 4. Index and Start Q&A Session
 
 ```bash
-# Interactive Q&A with all collections
+# Interactive Q&A (will auto-build index from parsed articles)
 cdc-corpus qa
 
-# Q&A with specific collection
+# Or manually build index first
+cdc-corpus index --collection pcd
 cdc-corpus qa --collection pcd
-
-# Q&A with language filter
-cdc-corpus qa --collection eid --language en --verbose
 ```
 
 ## CLI Reference
@@ -164,6 +181,27 @@ Options:
   -o, --output-dir TEXT                        Custom output directory
   -v, --verbose                                Show verbose output
 ```
+
+### Index Command
+
+Create and manage vector indexes for semantic search:
+
+```bash
+cdc-corpus index [OPTIONS]
+
+Options:
+  -c, --collection [pcd|eid|mmwr|all]          Collection to index (default: all)
+  -l, --language [en|es|fr|zhs|zht|all]        Language filter (default: en)
+  -s, --source-type [json|html]               Source type (default: json)
+  --use-bundled                               Extract pre-built bundled index
+  --status                                    Show index and data status
+  -v, --verbose                               Show verbose output
+```
+
+**Index Management:**
+- **Bundled Index**: Pre-built index included with package for immediate use
+- **Fresh Index**: Build index from your downloaded/parsed articles
+- **Status Check**: Review current index and data availability
 
 ### QA Command
 

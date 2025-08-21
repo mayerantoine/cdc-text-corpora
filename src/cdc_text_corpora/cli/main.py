@@ -12,6 +12,7 @@ import pathlib
 from cdc_text_corpora.core.downloader import download_collection
 from cdc_text_corpora.core.datasets import CDCCorpus
 from cdc_text_corpora.utils.config import get_data_directory
+from cdc_text_corpora.utils.index_manager import IndexManager
 from cdc_text_corpora.qa.rag_engine import RAGEngine
 
 ###TODO
@@ -270,6 +271,16 @@ def index(
         "-s",
         help="Source type: json (parsed articles) or html (raw HTML files)",
     ),
+    use_bundled: bool = typer.Option(
+        False,
+        "--use-bundled",
+        help="Extract and use pre-built bundled ChromaDB index",
+    ),
+    status: bool = typer.Option(
+        False,
+        "--status",
+        help="Show index and data availability status",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -278,6 +289,27 @@ def index(
     ),
 ) -> None:
     """Create vector index for semantic search and RAG operations."""
+    
+    # Initialize corpus and index manager
+    corpus = CDCCorpus()
+    index_manager = IndexManager(corpus, console)
+    
+    # Handle status flag
+    if status:
+        index_manager.show_guidance()
+        return
+    
+    # Handle bundled index extraction
+    if use_bundled:
+        console.print("[yellow]🔄 Extracting bundled ChromaDB index...[/yellow]")
+        success = index_manager.extract_bundled_index(force=True)
+        if success:
+            console.print("[green]✅ Bundled index extracted successfully![/green]")
+            console.print("[cyan]💡 You can now use: cdc-corpus qa[/cyan]")
+        else:
+            console.print("[red]❌ Failed to extract bundled index[/red]")
+            raise typer.Exit(1)
+        return
     
     # Validate collection input
     valid_collections = ["pcd", "eid", "mmwr", "all"]

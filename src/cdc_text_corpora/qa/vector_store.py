@@ -9,6 +9,8 @@ from pathlib import Path
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+from rich.console import Console
+from rich.prompt import Confirm
 
 
 class VectorStoreManager:
@@ -22,7 +24,9 @@ class VectorStoreManager:
     def __init__(
         self,
         embedding_model: str = "all-MiniLM-L6-v2",
-        persist_directory: str = "./chroma_db"
+        persist_directory: str = "./chroma_db",
+        corpus_manager: Optional[Any] = None,
+        console: Optional[Console] = None
     ) -> None:
         """
         Initialize the VectorStoreManager.
@@ -30,20 +34,31 @@ class VectorStoreManager:
         Args:
             embedding_model: Name of the HuggingFace embedding model to use
             persist_directory: Directory path for persisting ChromaDB data
+            corpus_manager: Optional CDCCorpus instance for IndexManager integration
+            console: Optional Rich console for user interaction
         """
         self.embedding_model_name = embedding_model
         self.persist_directory = persist_directory
+        self.corpus_manager = corpus_manager
+        self.console = console or Console()
         
         # Initialize components
         self.embeddings: Optional[HuggingFaceEmbeddings] = None
         self.vectorstore: Optional[Chroma] = None
         self.retriever: Optional[Any] = None
         
+        # Initialize IndexManager if corpus_manager is provided
+        self.index_manager: Optional[Any] = None
+        if self.corpus_manager:
+            # Import here to avoid circular imports
+            from cdc_text_corpora.utils.index_manager import IndexManager
+            self.index_manager = IndexManager(self.corpus_manager, self.console)
+        
         # Initialize the vector store
         self.initialize_store()
     
     def initialize_store(self) -> None:
-        """Initialize the vector store and embedding components."""
+        """Initialize the vector store with smart index resolution."""
         # Initialize embeddings
         self.embeddings = HuggingFaceEmbeddings(
             model_name=self.embedding_model_name,
@@ -53,6 +68,10 @@ class VectorStoreManager:
         # Ensure persist directory exists
         persist_path = Path(self.persist_directory)
         persist_path.mkdir(parents=True, exist_ok=True)
+        
+        # Smart index resolution logic
+        if self.index_manager:
+            self._resolve_index_source()
         
         # Initialize ChromaDB vector store
         self.vectorstore = Chroma(
@@ -65,6 +84,77 @@ class VectorStoreManager:
             search_type="similarity",
             search_kwargs={"k": 5}
         )
+    
+    def _resolve_index_source(self) -> None:
+        """
+        Resolve the best index source using priority order:
+        1. Existing local index
+        2. HTML articles available → delegate to RAGEngine.index_articles() 
+        3. No HTML articles → extract bundled pre-built index
+        4. Fallback → show guidance
+        """
+        if not self.index_manager:
+            return
+            
+        # 1. Check for existing valid local index
+        if self.index_manager.has_existing_index():
+            self.console.print("[green]✅ Using existing ChromaDB index[/green]")
+            return
+            
+        # 2. Check for HTML articles to build fresh index
+        if self.index_manager.has_html_articles():
+            self.console.print("[yellow]📚 HTML articles found - will build fresh index when needed[/yellow]")
+            # Note: Actual indexing will be handled by RAGEngine.index_articles() method
+            return
+            
+        # 3. No HTML articles → offer bundled index extraction
+        if self.index_manager.get_bundled_index_path():
+            self._handle_bundled_index_extraction()
+        else:
+            # 4. Fallback → show guidance
+            self._show_setup_guidance()
+    
+    def _handle_bundled_index_extraction(self) -> None:
+        """Handle bundled index extraction with user confirmation."""
+        if not self.index_manager:
+            return
+            
+        self.console.print("[yellow]📦 No local index found, but bundled index is available[/yellow]")
+        
+        # Check if this is likely an interactive session
+        try:
+            should_extract = Confirm.ask(
+                "Would you like to extract the bundled pre-built index for immediate use?",
+                default=True
+            )
+            
+            if should_extract:
+                success = self.index_manager.extract_bundled_index()
+                if success:
+                    self.console.print("[green]🚀 Ready for questions! Bundled index extracted.[/green]")
+                else:
+                    self._show_setup_guidance()
+            else:
+                self._show_setup_guidance()
+                
+        except (KeyboardInterrupt, EOFError):
+            # Non-interactive environment or user interrupted
+            self.console.print("[yellow]⚠️  In non-interactive mode. Use 'cdc-corpus index --use-bundled' to extract.[/yellow]")
+            self._show_setup_guidance()
+    
+    def _show_setup_guidance(self) -> None:
+        """Show helpful setup guidance."""
+        if self.index_manager:
+            self.index_manager.show_guidance()
+        else:
+            self.console.print("""
+[yellow]⚠️  No ChromaDB index available.[/yellow]
+
+[bold cyan]Quick Setup Options:[/bold cyan]
+1. Download data: [bold]cdc-corpus download --collection pcd[/bold]
+2. Parse articles: [bold]cdc-corpus parse --collection pcd[/bold]
+3. Start Q&A: [bold]cdc-corpus qa[/bold]
+            """)
     
     def check_index_exists(self) -> bool:
         """
